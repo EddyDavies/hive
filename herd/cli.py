@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -555,6 +556,20 @@ def cmd_restore(a) -> None:
         restore_one(r, include_closed=a.all, labels=a.labels if not a.every else [])
 
 
+def cmd_reap(a) -> None:
+    from herd import reaper
+    try:
+        if a.install:
+            print(f"reaper installed: {reaper.install()} (every 60s, grace {reaper.GRACE}s)")
+        elif a.uninstall:
+            reaper.uninstall()
+            print("reaper removed")
+        else:
+            reaper.reap(dry_run=a.dry_run)
+    except (RuntimeError, subprocess.SubprocessError) as e:
+        raise HerdError(f"reap: {e}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="herd", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -604,6 +619,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("labels", nargs="*", help="only these sheepdogs")
     s.add_argument("--all", action="store_true", help="include closed sheepdogs")
     s.add_argument("--every", action="store_true", help="every shepherd on record")
+
+    s = add("reap", cmd_reap, "stop Herdr sessions left detached and idle (run by launchd)")
+    s.add_argument("--dry-run", action="store_true", help="print what each session would get, change nothing")
+    s.add_argument("--install", action="store_true", help="install the launchd job that runs this every minute")
+    s.add_argument("--uninstall", action="store_true", help="remove the launchd job")
 
     for sp in sub.choices.values():
         sp.add_argument("--orch", help="shepherd slug (default: the one owning this workspace)")
