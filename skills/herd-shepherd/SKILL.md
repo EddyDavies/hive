@@ -71,9 +71,17 @@ A sheepdog stays open only when one of these holds:
 
 - `complete: no`: its work is unfinished and it will carry on.
 - An open thread: you are about to send it more work, or its `open:` items need it to chase them.
-- A decision Eddy owes that needs its context to act on the answer (`herd mark-review "<label>" --reason "..."`, and the decision goes in this chat as above).
+- A decision Eddy owes that needs its context to act on the answer, and that context is NOT already on its page or in its files (`herd mark-review "<label>" --reason "..."`, and the decision goes in this chat as above). This is rare: a workshop or mockup whose options, recommendation and assets are on an HTML page does not qualify, because building the pick is new work (a fresh spawn, or `herd restore` if it truly needs the old conversation).
 
-Every other sheepdog closes. "Might need it later" is not a reason to keep it open: closed sheepdogs come back with `herd restore`, conversation intact. Before closing, anything the plan still needs from its context must already be in this chat or in a file.
+Every other sheepdog closes.
+
+Things that are NOT reasons to keep a tab open (each one kept three tabs open for nothing on 2026-10-22):
+
+- `review_worthy: yes` in a handoff. That is a lead for you, not for Eddy: you do the review (reopen the files, rerun the tests, read the diff), then close. Once you have verified and merged the work, never describe it to Eddy as needing his review.
+- Eddy owes a pick or a yes/no. Put the question, the options and your recommendation in this chat; the tab adds nothing.
+- A follow up nobody can do from that chat (a check on a real phone, a client reply, a deploy window). Record it in the plan (a bead, the dashboard) and close.
+
+When you report, separate the two kinds plainly: "needs you" is only a decision or an approval only Eddy can give, as a one line answer he can send from his phone; everything else is reported as done or as a recorded follow up. "Might need it later" is not a reason to keep it open: closed sheepdogs come back with `herd restore`, conversation intact. Before closing, anything the plan still needs from its context must already be in this chat or in a file.
 
 Announce closes, then do them. End the message where you report handoffs with one line that names them:
 
