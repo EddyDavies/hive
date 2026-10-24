@@ -61,7 +61,7 @@ The registry copy is the source of truth; the message is only a wake up and can 
 
 ## Reporting to Eddy
 
-Eddy oversees herds on the go, often from his phone. He reads this chat; he does not want to open tabs. When handoffs land, give him a brief overview in this chat: one or two lines per sheepdog (what it did, the result), then "want more on any of these?". Expand only when he asks.
+Eddy oversees herds on the go, often from his phone. He reads this chat; he does not want to open tabs. When handoffs land, give him a brief overview in this chat in the report format below, then "want more on any of these?". Expand only when he asks.
 
 Never send him to a sheepdog's tab to read something. If a sheepdog produced something he must look at (a screen, a page, a diff), give him the link or path here. If its work ends in a decision only he can make, put the decision itself in this chat: the question, the options, your recommendation, in a few lines.
 
@@ -83,13 +83,23 @@ Things that are NOT reasons to keep a tab open (each one kept three tabs open fo
 
 When you report, separate the two kinds plainly: "needs you" is only a decision or an approval only Eddy can give, as a one line answer he can send from his phone; everything else is reported as done or as a recorded follow up. "Might need it later" is not a reason to keep it open: closed sheepdogs come back with `herd restore`, conversation intact. Before closing, anything the plan still needs from its context must already be in this chat or in a file.
 
-Announce closes, then do them. End the message where you report handoffs with one line that names them:
+## Report format
+
+One list carries both the overview and each sheepdog's fate, so every name appears once. One line per sheepdog: a number, ✓ (closes) or ● (stays open), the label exactly as its tab shows it without the `o>`/`f>` prefix, then what it did and the result. A ● line ends with why it stays open, in words Eddy can act on. ✓ lines first, ● lines last, so anything he must answer sits at the bottom. Close with the key line:
 
 ```
-Closing after your next message: drip copy, pricing review. Keeping open: copy review (waiting on your pick of headline).
+1 ✓ magazine feed: 6 cutout variants loaded on the page
+2 ✓ receipt trading card: receipt prints from under the card, 3 styles
+3 ✓ hanging rail saved: rail with saved outfits, 2 layouts
+4 ● dummy outfit builder: needs your pick, A (dummy front) or B (rail)
+5 ● item detail pinterest: Pinterest blocked by login; sign in and I rerun it
+
+✓ closes after your next message unless you say "keep 2"
 ```
 
-On Eddy's next message, before anything else, `herd close` each sheepdog you named, unless he said to keep one. Then tell him in one line which closed. `herd close` refuses without a recorded handoff and while the sheepdog is working; do not reach for `--force` unless Eddy asked.
+Numbers restart in every report; "keep 2" means line 2 of your last report. Sheepdogs still working are not listed until they hand off. If nothing closes, leave out the key line.
+
+On Eddy's next message, before anything else, `herd close` each ✓ sheepdog, unless he said to keep one (by number or label). Then tell him in one line which closed. `herd close` refuses without a recorded handoff and while the sheepdog is working; do not reach for `--force` unless Eddy asked.
 
 ## Restore
 
