@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from herd import cli
-from herd.registry import Registry
+from hive import cli
+from hive.registry import Registry
 
 
 @pytest.fixture
@@ -31,20 +31,20 @@ def reg():
 def test_init_records_orchestrator_and_labels_workspace(fake, orch):
     r = reg()
     assert r.data["orchestrator"]["session_id"] == "orch-sid"
-    assert r.data["orchestrator"]["name"] == "shepherd: fc: postiz"
-    assert ["agent", "prompt", "w1:p1", "/rename shepherd: fc: postiz"] in fake.calls()
+    assert r.data["orchestrator"]["name"] == "queen: fc: postiz"
+    assert ["agent", "prompt", "w1:p1", "/rename queen: fc: postiz"] in fake.calls()
     assert fake.world()["workspaces"]["w1"]["label"] == "◆ fc: postiz"
     assert fake.world()["tabs"]["w1:t1"]["label"] == "◆ fc: postiz"
 
 
-def test_init_refuses_while_this_chats_herd_has_open_sheepdogs(fake, orch, monkeypatch, capsys):
+def test_init_refuses_while_this_chats_hive_has_open_bees(fake, orch, monkeypatch, capsys):
     spawn(orch)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")
     assert cli.main(["init", "other"]) == 1
-    assert "already is the shepherd of fc-postiz" in capsys.readouterr().err
+    assert "already is the queen of fc-postiz" in capsys.readouterr().err
 
 
-def test_init_in_a_chat_whose_herd_is_done_stays_in_its_workspace(fake, orch, tmp_path, monkeypatch, capsys):
+def test_init_in_a_chat_whose_hive_is_done_stays_in_its_workspace(fake, orch, tmp_path, monkeypatch, capsys):
     spawn(orch)
     (tmp_path / "h.txt").write_text("done")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
@@ -91,7 +91,7 @@ def init_from_second_chat(monkeypatch, label="other"):
     return cli.main(["init", label])
 
 
-def test_init_moves_to_a_new_workspace_while_the_old_herd_has_open_workers(fake, orch, monkeypatch, capsys):
+def test_init_moves_to_a_new_workspace_while_the_old_hive_has_open_workers(fake, orch, monkeypatch, capsys):
     spawn(orch)
     second_chat_in_w1(fake)
     assert init_from_second_chat(monkeypatch) == 0
@@ -102,7 +102,7 @@ def test_init_moves_to_a_new_workspace_while_the_old_herd_has_open_workers(fake,
     assert reg().data["workspace_id"] == "w1"
 
 
-def test_init_takes_a_done_herds_workspace_even_if_its_shepherd_was_active_recently(fake, orch, tmp_path, monkeypatch, capsys):
+def test_init_takes_a_done_herds_workspace_even_if_its_queen_was_active_recently(fake, orch, tmp_path, monkeypatch, capsys):
     spawn(orch)
     (tmp_path / "h.txt").write_text("done")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
@@ -116,7 +116,7 @@ def test_init_takes_a_done_herds_workspace_even_if_its_shepherd_was_active_recen
     assert Registry.load("other").data["workspace_id"] == "w1"
 
 
-def test_init_moves_while_a_done_herds_other_shepherd_is_mid_turn(fake, orch, tmp_path, monkeypatch, capsys):
+def test_init_moves_while_a_done_herds_other_queen_is_mid_turn(fake, orch, tmp_path, monkeypatch, capsys):
     spawn(orch)
     (tmp_path / "h.txt").write_text("done")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
@@ -126,7 +126,7 @@ def test_init_moves_while_a_done_herds_other_shepherd_is_mid_turn(fake, orch, tm
     assert "moved this chat to new workspace" in capsys.readouterr().out
 
 
-def test_init_takes_the_workspace_of_a_stale_herd(fake, orch, tmp_path, monkeypatch, capsys):
+def test_init_takes_the_workspace_of_a_stale_hive(fake, orch, tmp_path, monkeypatch, capsys):
     spawn(orch)
     (tmp_path / "h.txt").write_text("done")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
@@ -150,13 +150,13 @@ def test_init_takes_the_workspace_of_a_stale_herd(fake, orch, tmp_path, monkeypa
     assert Registry.load("other").data["workspace_id"] == "w1"
 
 
-def test_old_workers_still_find_their_own_herd_after_a_takeover(fake, orch, tmp_path, monkeypatch, capsys):
+def test_old_workers_still_find_their_own_hive_after_a_takeover(fake, orch, tmp_path, monkeypatch, capsys):
     w = spawn(orch)
     second_chat_in_w1(fake)
     assert init_from_second_chat(monkeypatch) == 0
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", w["session_id"])
     monkeypatch.setenv("HERDR_WORKSPACE_ID", Registry.load("other").data["workspace_id"])
-    (tmp_path / "h.txt").write_text("HERD HANDOFF Drip")
+    (tmp_path / "h.txt").write_text("HIVE HANDOFF Drip")
     assert cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")]) == 0
     assert reg().worker("drip")["status"] == "handed-off"
 
@@ -170,7 +170,7 @@ def test_restore_of_a_retired_orchestrator_builds_a_new_workspace(fake, orch, mo
     cli.retire(reg())
     before = len(fake.calls())
     assert cli.main(["restore", "fc-postiz", "--all"]) == 0
-    assert any(c[:2] == ["pane", "move"] for c in fake.calls()[before:])  # the live shepherd moves, no empty shell
+    assert any(c[:2] == ["pane", "move"] for c in fake.calls()[before:])  # the live queen moves, no empty shell
     assert reg().data["workspace_id"] not in (None, "w1")
 
 
@@ -183,7 +183,7 @@ def test_adopt_makes_this_chat_the_orchestrator(fake, orch, monkeypatch, capsys)
     r = reg()
     assert r.data["orchestrator"]["session_id"] == "new-sid" and r.data["orchestrator"]["pane_id"] == "w1:p2"
     assert r.data["previous_orchestrators"][0]["session_id"] == "orch-sid"
-    assert ["agent", "prompt", "w1:p2", "/rename shepherd: fc: postiz"] in fake.calls()
+    assert ["agent", "prompt", "w1:p2", "/rename queen: fc: postiz"] in fake.calls()
     assert cli.main(["adopt", "fc-postiz"]) == 0 and "already" in capsys.readouterr().out
 
 
@@ -202,7 +202,7 @@ def test_adopt_refuses_while_old_chat_runs(fake, orch, monkeypatch, capsys):
 def test_adopt_from_another_herds_busy_workspace_moves_to_a_new_one(fake, orch, monkeypatch, capsys):
     spawn(orch)
     second_chat_in_w1(fake)
-    assert init_from_second_chat(monkeypatch, "busy") == 0  # busy herd now lives in its own workspace
+    assert init_from_second_chat(monkeypatch, "busy") == 0  # busy hive now lives in its own workspace
     busy = Registry.load("busy").data["workspace_id"]
     world = fake.world()
     world["agents"].append({"agent": "claude", "pane_id": f"{busy}:p9", "tab_id": f"{busy}:t9", "agent_status": "idle",
@@ -244,7 +244,7 @@ def test_rename_waits_while_the_orchestrator_has_a_draft(fake, orch, tmp_path, m
     assert reg().data["orchestrator"]["name"] == "app-32"
     fake.seed(screens={"w1:p1": "────\n❯ \n────\n  status"})
     assert cli.main(["sync"]) == 0
-    assert ["agent", "prompt", "w1:p1", "/rename shepherd: fc: postiz"] in fake.calls()[before:]
+    assert ["agent", "prompt", "w1:p1", "/rename queen: fc: postiz"] in fake.calls()[before:]
 
 
 def test_input_draft_reads_the_claude_input_box():
@@ -270,8 +270,8 @@ def test_spawn_registers_before_tab_and_starts_claude(fake, orch):
     start = next(c for c in calls if c[:2] == ["agent", "start"])
     claude = start[start.index("--") + 1:]
     assert claude[:6] == ["--session-id", w["session_id"], "--name", "Drip copy", "--model", "claude-opus-5-5"]
-    prompt = next(c for c in calls if c[:2] == ["agent", "prompt"] and "herd-sheepdog" in c[3])
-    assert '"shepherd: fc: postiz"' in prompt[3] and w["brief"] in prompt[3]
+    prompt = next(c for c in calls if c[:2] == ["agent", "prompt"] and "hive-bee" in c[3])
+    assert '"queen: fc: postiz"' in prompt[3] and w["brief"] in prompt[3]
     assert len([c for c in calls if c[:2] == ["agent", "prompt"] and c[3].startswith("/rename")]) == 1
     assert open(w["brief"]).read() == "Write the drip copy."
 
@@ -365,7 +365,7 @@ def test_close_refuses_while_working(fake, orch, tmp_path, capsys):
         if a.get("tab_id") == w["tab_id"]:
             a["agent_status"] = "working"
     fake.seed(agents=world["agents"])
-    (tmp_path / "h.txt").write_text("HERD HANDOFF Drip\ncomplete: yes")
+    (tmp_path / "h.txt").write_text("HIVE HANDOFF Drip\ncomplete: yes")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
     assert cli.main(["close", "Drip"]) == 1
     assert "working" in capsys.readouterr().err
@@ -374,7 +374,7 @@ def test_close_refuses_while_working(fake, orch, tmp_path, capsys):
 
 def test_handoff_then_close(fake, orch, tmp_path):
     w = spawn(orch)
-    (tmp_path / "h.txt").write_text("HERD HANDOFF Drip\ncomplete: yes")
+    (tmp_path / "h.txt").write_text("HIVE HANDOFF Drip\ncomplete: yes")
     assert cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")]) == 0
     assert reg().worker("drip")["status"] == "handed-off"
     assert cli.main(["close", "Drip"]) == 0
@@ -457,7 +457,7 @@ def test_status_prints_workers(fake, orch, capsys):
 def session_file(tmp_path, monkeypatch, name, sid="orch-sid", pid=None, started=1):
     d = tmp_path / "sessions"
     d.mkdir(exist_ok=True)
-    monkeypatch.setenv("HERD_CLAUDE_SESSIONS_DIR", str(d))
+    monkeypatch.setenv("HIVE_CLAUDE_SESSIONS_DIR", str(d))
     pid = os.getpid() if pid is None else pid
     (d / f"{name}.json").write_text(json.dumps({"pid": pid, "sessionId": sid, "name": name, "startedAt": started}))
 
@@ -476,8 +476,8 @@ def test_orchestrator_fails_loud_when_not_running(fake, orch, tmp_path, monkeypa
     session_file(tmp_path, monkeypatch, "app-7b", sid="someone-else")
     assert cli.main(["orchestrator"]) == 1
     err = capsys.readouterr().err
-    assert "not running" in err and "shepherd: fc: postiz" in err
-    assert reg().data["orchestrator"]["name"] == "shepherd: fc: postiz"
+    assert "not running" in err and "queen: fc: postiz" in err
+    assert reg().data["orchestrator"]["name"] == "queen: fc: postiz"
 
 
 def test_spawn_renames_an_orchestrator_running_under_a_derived_name(fake, orch, tmp_path, monkeypatch):
@@ -485,8 +485,8 @@ def test_spawn_renames_an_orchestrator_running_under_a_derived_name(fake, orch, 
     before = len(fake.calls())
     spawn(orch)
     prompts = [c for c in fake.calls()[before:] if c[:2] == ["agent", "prompt"]]
-    assert prompts[0][2:] == ["w1:p1", "/rename shepherd: fc: postiz"]
-    assert '"shepherd: fc: postiz"' in prompts[1][3] and "herd shepherd" in prompts[1][3]
+    assert prompts[0][2:] == ["w1:p1", "/rename queen: fc: postiz"]
+    assert '"queen: fc: postiz"' in prompts[1][3] and "hive queen" in prompts[1][3]
 
 
 def test_init_detects_name_without_flag(fake, tmp_path, monkeypatch):
@@ -498,7 +498,7 @@ def test_init_detects_name_without_flag(fake, tmp_path, monkeypatch):
                        "agent_session": {"kind": "id", "value": "orch-sid"}}])
     session_file(tmp_path, monkeypatch, "app-32")
     assert cli.main(["init", "fc: postiz"]) == 0
-    assert reg().data["orchestrator"]["name"] == "shepherd: fc: postiz"
+    assert reg().data["orchestrator"]["name"] == "queen: fc: postiz"
 
 
 def test_failed_rename_keeps_live_name_and_warns(fake, orch, tmp_path, monkeypatch, capsys):
@@ -514,16 +514,16 @@ def test_restore_resumes_orchestrator_under_its_fixed_name(fake, orch, monkeypat
     monkeypatch.setenv("HERDR_WORKSPACE_ID", "w-elsewhere")
     assert cli.main(["restore", "fc-postiz"]) == 0
     start = next(c for c in fake.calls() if c[:2] == ["agent", "start"] and "orch-sid" in c)
-    assert start[start.index("--name") + 1] == "shepherd: fc: postiz"
+    assert start[start.index("--name") + 1] == "queen: fc: postiz"
 
 
 def test_commands_use_the_orchestrators_own_herdr_server(fake, orch, monkeypatch):
-    """Run from another Herdr session, herd must still talk to the server the orchestrator lives in."""
+    """Run from another Herdr session, hive must still talk to the server the orchestrator lives in."""
     r = reg()
     r.data["herdr_socket"] = "/tmp/ple.sock"
     r.save()
     monkeypatch.setenv("HERDR_SOCKET_PATH", "/tmp/default.sock")
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")  # run from some other chat, not the shepherd
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")  # run from some other chat, not the queen
     monkeypatch.setenv("FAKE_HERDR_LOG_SOCKET", "1")
     before = len(fake.calls())
     assert cli.main(["sync", "--orch", "fc-postiz"]) == 0
@@ -537,12 +537,12 @@ def test_same_workspace_id_in_another_herdr_server_is_not_this_orchestrator(fake
     monkeypatch.setenv("HERDR_SOCKET_PATH", "/tmp/default.sock")
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     assert cli.main(["status"]) == 1
-    assert "no shepherd" in capsys.readouterr().err
+    assert "no queen" in capsys.readouterr().err
 
 
 def test_sync_reattaches_a_detached_worker_that_is_live(fake, orch, tmp_path):
     spawn(orch)
-    (tmp_path / "h.txt").write_text("HERD HANDOFF Drip\ncomplete: yes")
+    (tmp_path / "h.txt").write_text("HIVE HANDOFF Drip\ncomplete: yes")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
     r = reg()
     r.worker("drip")["status"] = "detached"
@@ -574,7 +574,7 @@ def orchestrator_moved_to(fake, monkeypatch, tmp_path, ws="w3", socket="/tmp/new
     return new
 
 
-def test_adopt_by_the_orchestrator_itself_points_a_moved_herd_at_its_new_home(fake, orch, tmp_path, monkeypatch, capsys):
+def test_adopt_by_the_orchestrator_itself_points_a_moved_hive_at_its_new_home(fake, orch, tmp_path, monkeypatch, capsys):
     spawn(orch)
     new = orchestrator_moved_to(fake, monkeypatch, tmp_path)
     capsys.readouterr()
@@ -612,11 +612,11 @@ def test_init_from_a_moved_orchestrator_points_to_adopt(fake, orch, tmp_path, mo
     spawn(orch)
     orchestrator_moved_to(fake, monkeypatch, tmp_path)
     assert cli.main(["init", "other"]) == 1
-    assert "herd adopt fc-postiz" in capsys.readouterr().err
+    assert "hive adopt fc-postiz" in capsys.readouterr().err
 
 
 def busy_home(fake, monkeypatch):
-    """The shepherd chat starts in w1, a workspace with five other chats in it."""
+    """The queen chat starts in w1, a workspace with five other chats in it."""
     monkeypatch.setenv("HERDR_WORKSPACE_ID", "w1")
     monkeypatch.setenv("HERDR_PANE_ID", "w1:p1")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")
@@ -628,32 +628,32 @@ def busy_home(fake, monkeypatch):
 
 
 def finish(tmp_path, label="Drip"):
-    (tmp_path / "h.txt").write_text(f"HERD HANDOFF {label}")
+    (tmp_path / "h.txt").write_text(f"HIVE HANDOFF {label}")
     assert cli.main(["handoff", label, "--file", str(tmp_path / "h.txt")]) == 0
     assert cli.main(["close", label]) == 0
 
 
-def test_closing_the_last_sheepdog_takes_the_shepherd_home(fake, monkeypatch, tmp_path, capsys):
+def test_closing_the_last_bee_takes_the_queen_home(fake, monkeypatch, tmp_path, capsys):
     busy_home(fake, monkeypatch)
-    herd_ws = reg().data["workspace_id"]
+    hive_ws = reg().data["workspace_id"]
     brief = tmp_path / "b.md"
     brief.write_text("x")
     for label in ("Drip", "Copy"):
         assert cli.main(["spawn", label, "--model", "opus", "--why", "x", "--brief", str(brief)]) == 0
-    assert reg().worker("drip")["tab_id"].startswith(herd_ws + ":")
+    assert reg().worker("drip")["tab_id"].startswith(hive_ws + ":")
     finish(tmp_path, "Drip")
-    assert reg().data["workspace_id"] == herd_ws  # Copy is still open
+    assert reg().data["workspace_id"] == hive_ws  # Copy is still open
     capsys.readouterr()
     finish(tmp_path, "Copy")
     assert "moved back to workspace w1" in capsys.readouterr().out
     r, world = reg(), fake.world()
-    assert r.data["workspace_id"] is None and herd_ws not in world["workspaces"]
+    assert r.data["workspace_id"] is None and hive_ws not in world["workspaces"]
     assert world["tabs"][r.data["orchestrator"]["tab_id"]] == {"label": "chat 1", "workspace_id": "w1",
                                                               "pane_id": r.data["orchestrator"]["pane_id"]}
     assert world["workspaces"]["w1"]["label"] == "pink ladies"
 
 
-def test_spawning_from_home_moves_the_shepherd_out_again(fake, monkeypatch, tmp_path, capsys):
+def test_spawning_from_home_moves_the_queen_out_again(fake, monkeypatch, tmp_path, capsys):
     busy_home(fake, monkeypatch)
     brief = tmp_path / "b.md"
     brief.write_text("x")
@@ -666,7 +666,7 @@ def test_spawning_from_home_moves_the_shepherd_out_again(fake, monkeypatch, tmp_
     assert r.data["orchestrator"]["tab_id"].startswith(r.data["workspace_id"] + ":")
 
 
-def test_a_solo_shepherd_stays_put_and_gets_its_names_back(fake, orch, tmp_path, capsys):
+def test_a_solo_queen_stays_put_and_gets_its_names_back(fake, orch, tmp_path, capsys):
     assert fake.world()["workspaces"]["w1"]["label"] == "◆ fc: postiz"
     spawn(orch)
     capsys.readouterr()
@@ -679,9 +679,9 @@ def test_a_solo_shepherd_stays_put_and_gets_its_names_back(fake, orch, tmp_path,
     assert not any(c[:2] == ["pane", "move"] for c in fake.calls())
 
 
-def test_shepherd_stays_when_its_home_workspace_is_gone(fake, monkeypatch, tmp_path, capsys):
+def test_queen_stays_when_its_home_workspace_is_gone(fake, monkeypatch, tmp_path, capsys):
     busy_home(fake, monkeypatch)
-    herd_ws = reg().data["workspace_id"]
+    hive_ws = reg().data["workspace_id"]
     brief = tmp_path / "b.md"
     brief.write_text("x")
     cli.main(["spawn", "Drip", "--model", "opus", "--why", "x", "--brief", str(brief)])
@@ -691,5 +691,5 @@ def test_shepherd_stays_when_its_home_workspace_is_gone(fake, monkeypatch, tmp_p
     fake.seed(**world)
     capsys.readouterr()
     finish(tmp_path)
-    assert "is gone, so the shepherd stays" in capsys.readouterr().out
-    assert reg().data["workspace_id"] == herd_ws
+    assert "is gone, so the queen stays" in capsys.readouterr().out
+    assert reg().data["workspace_id"] == hive_ws

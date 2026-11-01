@@ -20,7 +20,7 @@ class Herdr:
     def __init__(self, socket=None):
         """socket: the Herdr server to talk to (one per named Herdr session); default is this pane's own."""
         if os.environ.get("HERDR_ENV") != "1":
-            raise HerdrError("not inside Herdr (HERDR_ENV is not 1); run herd from a Herdr pane")
+            raise HerdrError("not inside Herdr (HERDR_ENV is not 1); run hive from a Herdr pane")
         self.env = {**os.environ, "HERDR_SOCKET_PATH": socket} if socket else None
 
     def run(self, *args: str) -> subprocess.CompletedProcess:

@@ -1,6 +1,6 @@
 import pytest
 
-from herd.herdr import Herdr, HerdrError
+from hive.herdr import Herdr, HerdrError
 
 
 def test_tab_create_returns_ids_and_passes_flags(fake):

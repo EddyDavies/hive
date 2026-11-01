@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from herd import reaper
+from hive import reaper
 
 STARTED = "INFO herdr::server::headless::bootstrap: herdr server started api_socket=x\n"
 
@@ -18,7 +18,7 @@ def det(cid):
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     """Fake herdr: sessions with server logs and agent lists; records stops."""
-    monkeypatch.setenv("HERD_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("HIVE_STATE_DIR", str(tmp_path / "state"))
     w = {"sessions": {}, "stopped": []}
 
     def add(name, log=STARTED, agents=("idle",)):

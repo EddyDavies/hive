@@ -1,12 +1,13 @@
 [project]
-name = "herd"
+name = "hive"
 version = "0.1.0"
 description = "Orchestrator and worker Claude chats on Herdr"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-herd = "herd.cli:main"
+hive = "hive.cli:main"
+herd = "hive.cli:main"  # old name, for chats started before the rename
 
 [dependency-groups]
 dev = ["pytest>=8"]

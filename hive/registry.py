@@ -1,6 +1,6 @@
-"""Durable record of every shepherd and the sheepdogs it spawned.
+"""Durable record of every queen and the bees it spawned.
 
-One JSON file per shepherd in the state dir. Written before any tab
+One JSON file per queen in the state dir. Written before any tab
 opens, so a crash never loses a session id.
 """
 
@@ -22,7 +22,8 @@ def now() -> str:
 
 
 def state_dir() -> Path:
-    d = Path(os.environ.get("HERD_STATE_DIR") or Path.home() / ".local/state/herd")
+    old = Path.home() / ".local/state/herd"  # machines set up before the rename keep their records there
+    d = Path(os.environ.get("HIVE_STATE_DIR") or (old if old.exists() else Path.home() / ".local/state/hive"))
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -54,7 +55,7 @@ class Registry:
     def create(cls, label: str, workspace_id: str, cwd: str, orchestrator: dict) -> "Registry":
         slug = slugify(label)
         if (state_dir() / f"{slug}.json").exists():
-            raise RegistryError(f"a shepherd named {slug!r} already exists")
+            raise RegistryError(f"a queen named {slug!r} already exists")
         return cls(slug, {
             "label": label,
             "workspace_id": workspace_id,
@@ -68,12 +69,12 @@ class Registry:
     def load(cls, slug: str) -> "Registry":
         path = state_dir() / f"{slug}.json"
         if not path.exists():
-            raise RegistryError(f"no shepherd named {slug!r} (see: herd ls)")
+            raise RegistryError(f"no queen named {slug!r} (see: hive ls)")
         return cls(slug, json.loads(path.read_text()))
 
     @classmethod
     def all(cls) -> list:
-        # reaper.json is the reaper's own state, not a herd.
+        # reaper.json is the reaper's own state, not a hive.
         return [cls.load(p.stem) for p in sorted(state_dir().glob("*.json")) if p.name != "reaper.json"]
 
     @classmethod
@@ -89,7 +90,7 @@ class Registry:
 
     def worker(self, name: str):
         """A slug match wins; otherwise the newest record with that label that did not fail to spawn
-        (older herds can hold a failed record and its retry under one label)."""
+        (older hives can hold a failed record and its retry under one label)."""
         key = name.strip().lower()
         for w in self.data["workers"]:
             if w["slug"] == key and w.get("status") != "failed":

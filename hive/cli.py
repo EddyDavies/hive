@@ -1,5 +1,5 @@
-"""herd: a shepherd Claude chat spawns, tracks, closes and restores
-labelled sheepdog chats in Herdr tabs. See docs/specs/2026-09-25-herd-design.md."""
+"""hive: a queen Claude chat spawns, tracks, closes and restores
+labelled bee chats in Herdr tabs. See docs/specs/2026-09-25-hive-design.md."""
 
 import argparse
 import json
@@ -9,16 +9,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from herd.herdr import Herdr, HerdrError
-from herd.registry import Registry, RegistryError, new_worker, now, slugify, state_dir
+from hive.herdr import Herdr, HerdrError
+from hive.registry import Registry, RegistryError, new_worker, now, slugify, state_dir
 
 MODEL_IDS = {"opus": "claude-opus-5-5", "fable": "claude-fable-5-1"}
 REVIEW = "👀 "
-RENAME_MAX_TABS = 3  # herd relabels a workspace only while it holds this few tabs; busier ones keep Eddy's name
+RENAME_MAX_TABS = 3  # hive relabels a workspace only while it holds this few tabs; busier ones keep Eddy's name
 OPEN_STATES = ("live", "handed-off", "review", "detached")
 
 
-class HerdError(Exception):
+class HiveError(Exception):
     pass
 
 
@@ -34,25 +34,25 @@ def claude_args(session_id: str, name: str, model: str, resume: bool) -> list:
     return args + ["--model", MODEL_IDS[model], "--dangerously-skip-permissions"]
 
 
-def shepherd_name(label: str) -> str:
-    """The shepherd chat's fixed SendMessage name. A name set with /rename survives restarts,
+def queen_name(label: str) -> str:
+    """The queen chat's fixed SendMessage name. A name set with /rename survives restarts,
     unlike the derived one (cwd plus a random suffix)."""
-    return f"shepherd: {label}"
+    return f"queen: {label}"
 
 
 def kickoff(w: dict, orch_name: str) -> str:
-    return (f'You are a herd sheepdog named "{w["label"]}". Load the herd-sheepdog skill now. '
-            f'Your shepherd\'s SendMessage name is "{orch_name}". If a message to it cannot be '
-            f'delivered, run `herd shepherd` for its current name. '
+    return (f'You are a hive bee named "{w["label"]}". Load the hive-bee skill now. '
+            f'Your queen\'s SendMessage name is "{orch_name}". If a message to it cannot be '
+            f'delivered, run `hive queen` for its current name. '
             f'Your brief is at {w["brief"]}. Read it and start.')
 
 
 def projects_dir() -> Path:
-    return Path(os.environ.get("HERD_CLAUDE_PROJECTS_DIR") or Path.home() / ".claude/projects")
+    return Path(os.environ.get("HIVE_CLAUDE_PROJECTS_DIR") or Path.home() / ".claude/projects")
 
 
 def sessions_dir() -> Path:
-    return Path(os.environ.get("HERD_CLAUDE_SESSIONS_DIR") or Path.home() / ".claude/sessions")
+    return Path(os.environ.get("HIVE_CLAUDE_SESSIONS_DIR") or Path.home() / ".claude/sessions")
 
 
 def pid_alive(pid) -> bool:
@@ -65,7 +65,7 @@ def pid_alive(pid) -> bool:
 
 def live_name(session_id: str):
     """SendMessage name of the running Claude process for this session, or None.
-    A shepherd that was never renamed gets a fresh derived name on every start, so a recorded name goes stale."""
+    A queen that was never renamed gets a fresh derived name on every start, so a recorded name goes stale."""
     best = None
     for f in sessions_dir().glob("*.json"):
         try:
@@ -80,7 +80,7 @@ def live_name(session_id: str):
 
 
 def refresh_orchestrator(r: Registry):
-    """Record the shepherd's current name. Returns it, or None when that chat is not running."""
+    """Record the queen's current name. Returns it, or None when that chat is not running."""
     o = r.data["orchestrator"]
     name = live_name(o.get("session_id", ""))
     if name and name != o.get("name"):
@@ -104,11 +104,11 @@ def input_draft(screen: str):
     return None
 
 
-def ensure_shepherd_name(r: Registry, h: Herdr) -> str:
-    """Rename the shepherd chat to its fixed name if it is running under any other.
-    /rename is typed into the chat, so it waits while Eddy has a draft there; the next herd command retries."""
+def ensure_queen_name(r: Registry, h: Herdr) -> str:
+    """Rename the queen chat to its fixed name if it is running under any other.
+    /rename is typed into the chat, so it waits while Eddy has a draft there; the next hive command retries."""
     o = r.data["orchestrator"]
-    want = shepherd_name(r.data["label"])
+    want = queen_name(r.data["label"])
     agent = h.live_sessions().get(o.get("session_id"))
     live = live_name(o.get("session_id", ""))
     if agent and (o.get("name") != want or (live and live != want)):
@@ -116,12 +116,12 @@ def ensure_shepherd_name(r: Registry, h: Herdr) -> str:
             draft = input_draft(h.pane_screen(agent["pane_id"]))
             if draft != "":
                 why = "it has an unsent draft" if draft else "its input box is not on screen"
-                print(f"herd: not renaming the shepherd chat to {want!r} yet: {why}; "
-                      f"the next herd command retries", file=sys.stderr)
+                print(f"hive: not renaming the queen chat to {want!r} yet: {why}; "
+                      f"the next hive command retries", file=sys.stderr)
                 return refresh_orchestrator(r) or o.get("name", "")
             h.agent_prompt(agent["pane_id"], f"/rename {want}")
         except HerdrError as e:
-            print(f"herd: could not rename the shepherd chat to {want!r}: {e}", file=sys.stderr)
+            print(f"hive: could not rename the queen chat to {want!r}: {e}", file=sys.stderr)
             return refresh_orchestrator(r) or o.get("name", "")
         o["name"] = want
         r.save()
@@ -135,13 +135,13 @@ def my_session_id():
 
 
 def registry_of_session(sid):
-    """The herd this chat belongs to, as shepherd or sheepdog. Workspaces change hands and panes move,
+    """The hive this chat belongs to, as queen or bee. Workspaces change hands and panes move,
     so a chat's own session id is the reliable key."""
     if not sid:
         return None
     mine = [r for r in Registry.all()
             if r.data["orchestrator"].get("session_id") == sid or any(w["session_id"] == sid for w in r.data["workers"])]
-    # one chat can shepherd several herds in turn: the current one is not retired, and the newest
+    # one chat can queen several hives in turn: the current one is not retired, and the newest
     mine.sort(key=lambda r: (not r.data.get("retired_at"), r.data.get("created_at", "")))
     return mine[-1] if mine else None
 
@@ -164,19 +164,19 @@ def current_registry(slug=None) -> Registry:
     ws = os.environ.get("HERDR_WORKSPACE_ID")
     r = Registry.find_by_workspace(ws, os.environ.get("HERDR_SOCKET_PATH")) if ws else None
     if r is None:
-        raise HerdError("this workspace has no shepherd; pass --orch <slug> (see: herd ls) or run herd init")
+        raise HiveError("this workspace has no queen; pass --orch <slug> (see: hive ls) or run hive init")
     return r
 
 
 def herdr_for(r: Registry) -> Herdr:
-    """The Herdr server this shepherd lives in, which may not be the one herd was run from."""
+    """The Herdr server this queen lives in, which may not be the one hive was run from."""
     return Herdr(r.data.get("herdr_socket"))
 
 
 def need_worker(r: Registry, name: str) -> dict:
     w = r.worker(name)
     if w is None:
-        raise HerdError(f"no sheepdog {name!r} in {r.slug}")
+        raise HiveError(f"no bee {name!r} in {r.slug}")
     return w
 
 
@@ -196,11 +196,11 @@ def own_pane(h: Herdr):
     if mine is None:
         pane = os.environ.get("HERDR_PANE_ID")
         if not pane:
-            raise HerdError("cannot find this chat in herdr; run this from the shepherd's own pane")
+            raise HiveError("cannot find this chat in herdr; run this from the queen's own pane")
         mine = next((x for x in agents if x.get("pane_id") == pane), None)
         sid = ((mine or {}).get("agent_session") or {}).get("value")
     if not mine or not sid:
-        raise HerdError("herdr reports no Claude session for this chat; cannot record the shepherd")
+        raise HiveError("herdr reports no Claude session for this chat; cannot record the queen")
     ws = mine.get("workspace_id") or os.environ.get("HERDR_WORKSPACE_ID")
     return ws, mine["pane_id"], mine, sid
 
@@ -210,35 +210,35 @@ def open_workers(r: Registry) -> list:
 
 
 def stale(r: Registry, h: Herdr):
-    """Why this herd may give up its workspace, or None while it is still in use. A herd whose sheepdogs are all
-    closed is done; only a different shepherd chat mid-turn (it may be about to spawn) keeps it."""
+    """Why this hive may give up its workspace, or None while it is still in use. A hive whose bees are all
+    closed is done; only a different queen chat mid-turn (it may be about to spawn) keeps it."""
     if any(w["status"] not in ("closed", "failed") for w in r.data["workers"]):
         return None
     o = r.data["orchestrator"]
     if o.get("session_id") != my_session_id() and any(
             a.get("agent_status") == "working" for a in h.agents() if a.get("pane_id") == o.get("pane_id")):
         return None
-    return "every sheepdog closed"
+    return "every bee closed"
 
 
 def retire(r: Registry) -> None:
-    """The shepherd gives up its workspace. Its record and sheepdogs stay restorable (into a new workspace)."""
+    """The queen gives up its workspace. Its record and bees stay restorable (into a new workspace)."""
     r.data["workspace_id"] = None
     r.data["retired_at"] = now()
     r.save()
 
 
 def label_workspace(h: Herdr, ws: str, label: str) -> None:
-    """Name the workspace after the herd only while it is small (RENAME_MAX_TABS tabs or fewer). A workspace
-    with many chats already has a name Eddy chose for that area; the shepherd's own tab carries the herd label."""
+    """Name the workspace after the hive only while it is small (RENAME_MAX_TABS tabs or fewer). A workspace
+    with many chats already has a name Eddy chose for that area; the queen's own tab carries the hive label."""
     tabs = next((w.get("tab_count") for w in h.workspaces() if w["workspace_id"] == ws), None)
     if tabs is not None and tabs <= RENAME_MAX_TABS:
         h.workspace_rename(ws, label)
 
 
 def make_room(r: Registry, h: Herdr, ws: str, pane: str, mine: dict, socket):
-    """r's shepherd chat sits in ws. If another herd holds ws, take it when that herd is stale (every sheepdog
-    closed, shepherd idle); otherwise move this chat into a new workspace. Returns (workspace id, agent record)."""
+    """r's queen chat sits in ws. If another hive holds ws, take it when that hive is stale (every bee
+    closed, queen idle); otherwise move this chat into a new workspace. Returns (workspace id, agent record)."""
     other = Registry.find_by_workspace(ws, socket)
     if not other or other.slug == r.slug:
         r.data["workspace_id"] = ws
@@ -258,8 +258,8 @@ def make_room(r: Registry, h: Herdr, ws: str, pane: str, mine: dict, socket):
 
 
 def go_out(r: Registry, h: Herdr) -> str:
-    """Move the shepherd chat into a workspace of its own, `◆ <label>`, where its sheepdogs' tabs open.
-    Every herd works in its own workspace, so Eddy's workspaces are never relabelled or crowded."""
+    """Move the queen chat into a workspace of its own, `◆ <label>`, where its bees' tabs open.
+    Every hive works in its own workspace, so Eddy's workspaces are never relabelled or crowded."""
     o = r.data["orchestrator"]
     moved = h.pane_move_to_new_workspace(o["pane_id"], f"◆ {r.data['label']}")
     r.data["workspace_id"] = moved["workspace_id"]
@@ -269,7 +269,7 @@ def go_out(r: Registry, h: Herdr) -> str:
 
 
 def label_here(r: Registry, h: Herdr) -> None:
-    """A solo shepherd's own workspace and tab carry the herd label while it has sheepdogs."""
+    """A solo queen's own workspace and tab carry the hive label while it has bees."""
     o = r.data["orchestrator"]
     h.workspace_rename(r.data["workspace_id"], f"◆ {r.data['label']}")
     if o.get("tab_id"):
@@ -279,8 +279,8 @@ def label_here(r: Registry, h: Herdr) -> None:
 
 
 def go_home(r: Registry, h: Herdr):
-    """Every sheepdog is closed: move the shepherd chat back to the workspace it started in, under its old tab
-    name. Herdr closes the herd workspace once it is empty. Returns a line for Eddy, or None if it stays put."""
+    """Every bee is closed: move the queen chat back to the workspace it started in, under its old tab
+    name. Herdr closes the hive workspace once it is empty. Returns a line for Eddy, or None if it stays put."""
     home = r.data.get("home") or {}
     o = r.data["orchestrator"]
     if open_workers(r) or not home.get("workspace_id") or not r.data.get("workspace_id"):
@@ -294,18 +294,18 @@ def go_home(r: Registry, h: Herdr):
             h.tab_rename(o["tab_id"], home["tab_label"])
         home["returned"] = True
         r.save()
-        return "every sheepdog closed: the workspace and the shepherd's tab have their old names back"
+        return "every bee closed: the workspace and the queen's tab have their old names back"
     if home["workspace_id"] not in {w["workspace_id"] for w in h.workspaces()}:
-        return f"its home workspace {home['workspace_id']} is gone, so the shepherd stays in {r.data['workspace_id']}"
+        return f"its home workspace {home['workspace_id']} is gone, so the queen stays in {r.data['workspace_id']}"
     if o.get("session_id") not in h.live_sessions():
         return None
-    herd_ws = r.data["workspace_id"]
+    hive_ws = r.data["workspace_id"]
     moved = h.pane_move_to_workspace(o["pane_id"], home["workspace_id"], home.get("tab_label") or f"◆ {r.data['label']}")
     o.update(pane_id=moved["pane_id"], tab_id=moved["tab_id"])
     r.data["workspace_id"] = None  # at home; the next spawn moves it out again
     r.save()
-    left = "" if moved.get("closed_workspace_id") == herd_ws else f"; workspace {herd_ws} still has other tabs, so it stays"
-    return f"every sheepdog closed: the shepherd moved back to workspace {home['workspace_id']}{left}"
+    left = "" if moved.get("closed_workspace_id") == hive_ws else f"; workspace {hive_ws} still has other tabs, so it stays"
+    return f"every bee closed: the queen moved back to workspace {home['workspace_id']}{left}"
 
 
 def at_home(r: Registry, ws: str) -> bool:
@@ -326,12 +326,12 @@ def old_server_sessions(r: Registry, socket) -> dict:
 def refuse_stranded(r: Registry, live: dict) -> None:
     stranded = [w["label"] for w in r.data["workers"] if w["status"] in OPEN_STATES and w["session_id"] in live]
     if stranded:
-        raise HerdError(f"{r.slug}'s sheepdogs ({', '.join(stranded)}) run in another Herdr session "
-                        f"(socket {r.data.get('herdr_socket')}); run herd adopt from a pane in that session, or close them first")
+        raise HiveError(f"{r.slug}'s bees ({', '.join(stranded)}) run in another Herdr session "
+                        f"(socket {r.data.get('herdr_socket')}); run hive adopt from a pane in that session, or close them first")
 
 
 def move_cwd(r: Registry, new: str) -> None:
-    """The herd's folder was moved: point it, and sheepdogs that worked inside it, at the folder the chat is in now."""
+    """The hive's folder was moved: point it, and bees that worked inside it, at the folder the chat is in now."""
     old = r.data.get("cwd")
     if not old or old == new or Path(old).exists() or not Path(new).is_dir():
         return
@@ -342,12 +342,12 @@ def move_cwd(r: Registry, new: str) -> None:
 
 
 def rehome(r: Registry):
-    """r's shepherd is this chat, but it now runs somewhere else: its folder moved, or Herdr brought it back
+    """r's queen is this chat, but it now runs somewhere else: its folder moved, or Herdr brought it back
     in another session or workspace. Point r at where the chat is now. Returns what moved, or None."""
     h = Herdr()
     try:
         ws, pane, mine, sid = own_pane(h)
-    except HerdError:
+    except HiveError:
         return None
     if sid != r.data["orchestrator"].get("session_id"):
         return None
@@ -383,10 +383,10 @@ def cmd_init(a) -> None:
     if mine_already and mine_already.data["orchestrator"].get("session_id") == sid and not mine_already.data.get("retired_at"):
         left = open_workers(mine_already)
         if left:
-            raise HerdError(f"this chat already is the shepherd of {mine_already.slug}, which still has open sheepdogs "
-                            f"({', '.join(left)}); close them first, or run herd adopt {mine_already.slug} if it moved")
-        retire(mine_already)  # its sheepdogs are all closed: that herd is done, this chat starts the next one here
-        print(f"retired {mine_already.slug} (every sheepdog closed); it stays restorable")
+            raise HiveError(f"this chat already is the queen of {mine_already.slug}, which still has open bees "
+                            f"({', '.join(left)}); close them first, or run hive adopt {mine_already.slug} if it moved")
+        retire(mine_already)  # its bees are all closed: that hive is done, this chat starts the next one here
+        print(f"retired {mine_already.slug} (every bee closed); it stays restorable")
     socket = os.environ.get("HERDR_SOCKET_PATH")
     r = Registry.create(a.label, workspace_id=None, cwd=(mine.get("cwd") or os.getcwd()), orchestrator={
         "name": live_name(sid) or a.name or "", "session_id": sid, "model": a.model, "pane_id": pane, "tab_id": mine.get("tab_id")})
@@ -399,7 +399,7 @@ def cmd_init(a) -> None:
     r.save()
     if solo:
         # the chat's tab is its workspace's only one: moving it out would close the workspace it returns to,
-        # so the herd works here and the names go back when every sheepdog is closed
+        # so the hive works here and the names go back when every bee is closed
         ws, mine = make_room(r, h, ws, pane, mine, socket)
         r.save()
         if r.data["workspace_id"] == ws and r.data["home"]["workspace_id"] == ws:
@@ -409,25 +409,25 @@ def cmd_init(a) -> None:
             r.save()
     else:
         ws = go_out(r, h)
-    name = ensure_shepherd_name(r, h)
-    print(f"shepherd {r.slug} in {ws} (session {sid}, SendMessage name {name!r})")
+    name = ensure_queen_name(r, h)
+    print(f"queen {r.slug} in {ws} (session {sid}, SendMessage name {name!r})")
 
 
 def cmd_adopt(a) -> None:
-    """This chat becomes the shepherd of an existing herd, in the workspace it is in."""
+    """This chat becomes the queen of an existing hive, in the workspace it is in."""
     h = Herdr()
     ws, pane, mine, sid = own_pane(h)
     r = Registry.load(a.slug)
     old = r.data["orchestrator"]
     if old.get("session_id") == sid:
-        print(rehome(r) or f"this chat already is the shepherd of {r.slug}")
+        print(rehome(r) or f"this chat already is the queen of {r.slug}")
         return
     if old.get("session_id") in h.live_sessions():
-        raise HerdError(f"{r.slug}'s shepherd chat is still running (pane {old.get('pane_id')}); close it first")
+        raise HiveError(f"{r.slug}'s queen chat is still running (pane {old.get('pane_id')}); close it first")
     socket = os.environ.get("HERDR_SOCKET_PATH")
     live = old_server_sessions(r, socket)
     if old.get("session_id") in live:
-        raise HerdError(f"{r.slug}'s shepherd chat is still running in another Herdr session "
+        raise HiveError(f"{r.slug}'s queen chat is still running in another Herdr session "
                         f"(socket {r.data.get('herdr_socket')}); close it first")
     refuse_stranded(r, live)
     move_cwd(r, mine.get("cwd") or os.getcwd())
@@ -441,29 +441,29 @@ def cmd_adopt(a) -> None:
     label_workspace(h, ws, f"◆ {r.data['label']}")
     if mine.get("tab_id"):
         h.tab_rename(mine["tab_id"], f"◆ {r.data['label']}")
-    name = ensure_shepherd_name(r, h)
+    name = ensure_queen_name(r, h)
     left = open_workers(r)
-    print(f"adopted {r.slug} (SendMessage name {name!r})" + (f"; open sheepdogs: {', '.join(left)}" if left else ""))
+    print(f"adopted {r.slug} (SendMessage name {name!r})" + (f"; open bees: {', '.join(left)}" if left else ""))
 
 
 def cmd_spawn(a) -> None:
     r = current_registry(a.orch)
     h = herdr_for(r)
-    orch_name = ensure_shepherd_name(r, h)
+    orch_name = ensure_queen_name(r, h)
     brief_src = Path(a.brief).expanduser()
     if not brief_src.is_file():
-        raise HerdError(f"brief not found: {brief_src}")
+        raise HiveError(f"brief not found: {brief_src}")
     same = [x for x in r.data["workers"] if x["label"].lower() == a.label.strip().lower()]
     if any(x["status"] != "failed" for x in same):
-        raise HerdError(f"a sheepdog labelled {a.label!r} already exists in {r.slug}; pick another label "
-                        f"(or herd restore it if it is closed)")
+        raise HiveError(f"a bee labelled {a.label!r} already exists in {r.slug}; pick another label "
+                        f"(or hive restore it if it is closed)")
     open_tabs = {t["tab_id"] for t in h.tabs()} if any(x.get("tab_id") for x in same) else set()
     for x in same:  # a retry replaces the failed spawn, and its tab if one was left behind
         if x.get("tab_id") in open_tabs:
             h.tab_close(x["tab_id"])
     r.data["workers"] = [x for x in r.data["workers"] if x not in same]
     if not r.data.get("workspace_id"):
-        print(f"shepherd moved to its herd workspace {go_out(r, h)}")
+        print(f"queen moved to its hive workspace {go_out(r, h)}")
     elif (r.data.get("home") or {}).get("returned"):
         label_here(r, h)
     w = new_worker(r, a.label, model=a.model, why=a.why, cwd=str(Path(a.cwd or r.data["cwd"]).expanduser()), brief="")
@@ -499,7 +499,7 @@ def cmd_handoff(a) -> None:
     w = need_worker(r, a.label)
     text = sys.stdin.read() if a.file == "-" else Path(a.file).read_text()
     if not text.strip():
-        raise HerdError("handoff text is empty")
+        raise HiveError("handoff text is empty")
     w["handoff"] = {"text": text.strip(), "at": now()}
     set_status(w, "handed-off")
     r.save()
@@ -511,7 +511,7 @@ def cmd_orchestrator(a) -> None:
     name = refresh_orchestrator(r)
     if not name:
         o = r.data["orchestrator"]
-        raise HerdError(f"shepherd chat for {r.slug} is not running (session {o.get('session_id')}, "
+        raise HiveError(f"queen chat for {r.slug} is not running (session {o.get('session_id')}, "
                         f"last known as {o.get('name')}); do not guess another session")
     print(name)
 
@@ -534,17 +534,17 @@ def cmd_close(a) -> None:
         print(f"{w['label']} is already closed")
         return
     if not w.get("handoff") and not a.force:
-        raise HerdError(f"{w['label']} has no handoff on record; record one first or pass --force")
+        raise HiveError(f"{w['label']} has no handoff on record; record one first or pass --force")
     h = herdr_for(r)
     agent = h.live_sessions().get(w["session_id"])
     if agent and agent.get("agent_status") == "working":
-        raise HerdError(f"{w['label']} is still working; not closing")
+        raise HiveError(f"{w['label']} is still working; not closing")
     if w.get("tab_id") and any(t["tab_id"] == w["tab_id"] for t in h.tabs()):
         h.tab_close(w["tab_id"])
     set_status(w, "closed")
     w["closed_at"] = now()
     r.save()
-    print(f"closed {w['label']} (restore with: herd restore {r.slug} {w['slug']})")
+    print(f"closed {w['label']} (restore with: hive restore {r.slug} {w['slug']})")
     back = go_home(r, h)
     if back:
         print(back)
@@ -569,7 +569,7 @@ def sync(r: Registry, h: Herdr) -> list:
 def cmd_sync(a) -> None:
     r = current_registry(a.orch)
     h = herdr_for(r)
-    ensure_shepherd_name(r, h)
+    ensure_queen_name(r, h)
     changed = sync(r, h)
     print(f"detached: {', '.join(changed)}" if changed else "in sync")
 
@@ -587,7 +587,7 @@ def cmd_status(a) -> None:
     r = current_registry(a.orch)
     o = r.data["orchestrator"]
     running = "" if refresh_orchestrator(r) else ", not running"
-    print(f"◆ {r.data['label']}  [{r.slug}]  workspace {where(r)}  shepherd {o.get('name')} ({o.get('model')}{running})")
+    print(f"◆ {r.data['label']}  [{r.slug}]  workspace {where(r)}  queen {o.get('name')} ({o.get('model')}{running})")
     for w in r.data["workers"]:
         last = (w.get("handoff") or {}).get("text", "").splitlines()
         tail = last[1] if len(last) > 1 else (last[0] if last else "")
@@ -598,7 +598,7 @@ def cmd_ls(a) -> None:
         counts = {}
         for w in r.data["workers"]:
             counts[w["status"]] = counts.get(w["status"], 0) + 1
-        summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no sheepdogs"
+        summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no bees"
         print(f"{r.slug:<28} {r.data['label']:<32} {where(r):<8} {summary}")
 
 
@@ -610,19 +610,19 @@ def restore_one(r: Registry, include_closed: bool, labels: list) -> None:
     o = r.data["orchestrator"]
     if r.data["workspace_id"] not in ws_ids and o.get("session_id") in live:
         o["pane_id"] = live[o["session_id"]]["pane_id"]
-        print(f"moved the shepherd to workspace {go_out(r, h)} for {r.slug}")
+        print(f"moved the queen to workspace {go_out(r, h)} for {r.slug}")
     elif r.data["workspace_id"] not in ws_ids:
         ws, tab, pane = h.workspace_create(f"◆ {r.data['label']}", r.data["cwd"])
         r.data["workspace_id"] = ws
         r.save()
         if o.get("session_id") not in live:
-            h.agent_start(slugify("orch-" + r.slug, names), pane, claude_args(o["session_id"], shepherd_name(r.data["label"]), o.get("model", "fable"), resume=True))
+            h.agent_start(slugify("orch-" + r.slug, names), pane, claude_args(o["session_id"], queen_name(r.data["label"]), o.get("model", "fable"), resume=True))
             o.update(tab_id=tab, pane_id=pane)
             r.save()
         print(f"rebuilt workspace {ws} for {r.slug}")
     elif o.get("session_id") and o["session_id"] not in live:
         tab, pane = h.tab_create(r.data["workspace_id"], f"◆ {r.data['label']}", r.data["cwd"])
-        h.agent_start(slugify("orch-" + r.slug, names), pane, claude_args(o["session_id"], shepherd_name(r.data["label"]), o.get("model", "fable"), resume=True))
+        h.agent_start(slugify("orch-" + r.slug, names), pane, claude_args(o["session_id"], queen_name(r.data["label"]), o.get("model", "fable"), resume=True))
         o.update(tab_id=tab, pane_id=pane)
         r.save()
     wanted = [need_worker(r, l) for l in labels] if labels else [
@@ -653,7 +653,7 @@ def cmd_restore(a) -> None:
 
 
 def cmd_reap(a) -> None:
-    from herd import reaper
+    from hive import reaper
     try:
         if a.install:
             print(f"reaper installed: {reaper.install()} (every 60s, grace {reaper.GRACE}s)")
@@ -663,11 +663,11 @@ def cmd_reap(a) -> None:
         else:
             reaper.reap(dry_run=a.dry_run)
     except (RuntimeError, subprocess.SubprocessError) as e:
-        raise HerdError(f"reap: {e}")
+        raise HiveError(f"reap: {e}")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="herd", description=__doc__)
+    p = argparse.ArgumentParser(prog="hive", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def add(name, fn, help_):
@@ -675,46 +675,47 @@ def build_parser() -> argparse.ArgumentParser:
         s.set_defaults(fn=fn)
         return s
 
-    s = add("init", cmd_init, "adopt this Herdr workspace for the shepherd chat in this pane")
+    s = add("init", cmd_init, "adopt this Herdr workspace for the queen chat in this pane")
     s.add_argument("label")
-    s.add_argument("--name", help="deprecated: init renames this chat to 'shepherd: <label>' itself")
+    s.add_argument("--name", help="deprecated: init renames this chat to 'queen: <label>' itself")
     s.add_argument("--model", choices=MODEL_IDS, default="fable")
 
-    s = add("adopt", cmd_adopt, "become the shepherd of an existing herd whose chat is gone")
-    s.add_argument("slug", help="shepherd slug (see: herd ls)")
+    s = add("adopt", cmd_adopt, "become the queen of an existing hive whose chat is gone")
+    s.add_argument("slug", help="queen slug (see: hive ls)")
     s.add_argument("--model", choices=MODEL_IDS, default="fable")
 
-    s = add("spawn", cmd_spawn, "open a labelled tab and start a sheepdog chat")
+    s = add("spawn", cmd_spawn, "open a labelled tab and start a bee chat")
     s.add_argument("label")
     s.add_argument("--model", choices=MODEL_IDS, required=True)
     s.add_argument("--why", required=True, help="one line: why this model")
     s.add_argument("--brief", required=True, help="markdown brief file")
     s.add_argument("--cwd")
 
-    s = add("handoff", cmd_handoff, "record a sheepdog's HERD HANDOFF message")
+    s = add("handoff", cmd_handoff, "record a bee's HIVE HANDOFF message")
     s.add_argument("label")
     s.add_argument("--file", required=True, help="file with the handoff text, or - for stdin")
 
-    add("shepherd", cmd_orchestrator, "print the shepherd's current SendMessage name")
+    add("queen", cmd_orchestrator, "print the queen's current SendMessage name")
 
-    add("orchestrator", cmd_orchestrator, "old name for herd shepherd")
+    add("shepherd", cmd_orchestrator, "old name for hive queen")
+    add("orchestrator", cmd_orchestrator, "old name for hive queen")
 
-    s = add("mark-review", cmd_mark_review, "flag a sheepdog as awaiting Eddy's review")
+    s = add("mark-review", cmd_mark_review, "flag a bee as awaiting Eddy's review")
     s.add_argument("label")
     s.add_argument("--reason", default="")
 
-    s = add("close", cmd_close, "close a sheepdog's tab after its handoff")
+    s = add("close", cmd_close, "close a bee's tab after its handoff")
     s.add_argument("label")
     s.add_argument("--force", action="store_true", help="close without a recorded handoff")
 
-    add("status", cmd_status, "sheepdogs of this shepherd")
-    add("ls", cmd_ls, "every shepherd on record")
-    add("sync", cmd_sync, "mark sheepdogs whose tabs vanished as detached")
+    add("status", cmd_status, "bees of this queen")
+    add("ls", cmd_ls, "every queen on record")
+    add("sync", cmd_sync, "mark bees whose tabs vanished as detached")
 
-    s = add("restore", cmd_restore, "reopen a shepherd and its sheepdogs")
-    s.add_argument("labels", nargs="*", help="only these sheepdogs")
-    s.add_argument("--all", action="store_true", help="include closed sheepdogs")
-    s.add_argument("--every", action="store_true", help="every shepherd on record")
+    s = add("restore", cmd_restore, "reopen a queen and its bees")
+    s.add_argument("labels", nargs="*", help="only these bees")
+    s.add_argument("--all", action="store_true", help="include closed bees")
+    s.add_argument("--every", action="store_true", help="every queen on record")
 
     s = add("reap", cmd_reap, "stop Herdr sessions left detached and idle (run by launchd)")
     s.add_argument("--dry-run", action="store_true", help="print what each session would get, change nothing")
@@ -722,20 +723,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--uninstall", action="store_true", help="remove the launchd job")
 
     for sp in sub.choices.values():
-        sp.add_argument("--orch", help="shepherd slug (default: the one owning this workspace)")
+        sp.add_argument("--orch", help="queen slug (default: the one owning this workspace)")
     return p
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "restore" and args.labels and not args.orch:
-        # `herd restore <orch> [labels]`: first positional names the orchestrator when it is one
+        # `hive restore <orch> [labels]`: first positional names the orchestrator when it is one
         if (state_dir() / f"{args.labels[0]}.json").exists():
             args.orch, args.labels = args.labels[0], args.labels[1:]
     try:
         args.fn(args)
-    except (HerdError, HerdrError, RegistryError) as e:
-        print(f"herd: {e}", file=sys.stderr)
+    except (HiveError, HerdrError, RegistryError) as e:
+        print(f"hive: {e}", file=sys.stderr)
         return 1
     return 0
 

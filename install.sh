@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Install the herd CLI (editable, via uv) and link its two skills (herd-shepherd, herd-sheepdog) into ~/.claude/skills.
+# Install the hive CLI (editable, via uv) and link its two skills (hive-queen, hive-bee) into ~/.claude/skills.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
+uv tool uninstall herd >/dev/null 2>&1 || true  # the tool's old name
+rm -f "$HOME/.claude/skills/herd-shepherd" "$HOME/.claude/skills/herd-sheepdog"
 uv tool install --editable "$here" --force
-for s in herd-shepherd herd-sheepdog; do
+for s in hive-queen hive-bee; do
   ln -sfn "$here/skills/$s" "$HOME/.claude/skills/$s"
 done
-echo "herd installed: $(command -v herd)"
+echo "hive installed: $(command -v hive)"

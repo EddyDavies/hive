@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from herd import registry as reg
+from hive import registry as reg
 
 
 @pytest.fixture(autouse=True)
 def state(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERD_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("HIVE_STATE_DIR", str(tmp_path))
     return tmp_path
 
 

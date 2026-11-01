@@ -1,4 +1,4 @@
-"""herd reap: stop Herdr sessions nobody is looking at.
+"""hive reap: stop Herdr sessions nobody is looking at.
 
 A Herdr server outlives its window, so every Claude in it (and each one's MCP
 servers) keeps running after Eddy closes the terminal. Run once a minute by
@@ -17,12 +17,12 @@ import subprocess
 import time
 from pathlib import Path
 
-from herd.registry import state_dir
+from hive.registry import state_dir
 
-GRACE = int(os.environ.get("HERD_REAP_GRACE", 600))  # seconds detached and idle before a stop
-SKIP = set(os.environ.get("HERD_REAP_SKIP", "default").split(","))  # session names never stopped
+GRACE = int(os.environ.get("HIVE_REAP_GRACE", 600))  # seconds detached and idle before a stop
+SKIP = set(os.environ.get("HIVE_REAP_SKIP", "default").split(","))  # session names never stopped
 QUIET_STATES = {"idle", "done", "blocked"}  # anything else (working, unknown) keeps a session alive
-LABEL = "com.eddydavies.herd-reaper"
+LABEL = "com.eddydavies.hive-reaper"
 PLIST = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
 
 CLIENT_EVENT = re.compile(r"client (connected|detached) client_id=(\d+)")
@@ -118,16 +118,16 @@ def reap(dry_run=False, now=None) -> list:
 
 
 def install() -> str:
-    herd = shutil.which("herd")
-    if not herd:
-        raise RuntimeError("herd is not on PATH; run ./install.sh first")
+    hive = shutil.which("hive")
+    if not hive:
+        raise RuntimeError("hive is not on PATH; run ./install.sh first")
     herdr_bin = shutil.which("herdr")
     path = ":".join(dict.fromkeys([str(Path(herdr_bin).parent) if herdr_bin else "/opt/homebrew/bin",
-                                   str(Path(herd).parent), "/usr/bin", "/bin"]))
+                                   str(Path(hive).parent), "/usr/bin", "/bin"]))
     state_dir().mkdir(parents=True, exist_ok=True)
     PLIST.write_bytes(plistlib.dumps({
         "Label": LABEL,
-        "ProgramArguments": [herd, "reap"],
+        "ProgramArguments": [hive, "reap"],
         "StartInterval": 60,
         "RunAtLoad": True,
         "EnvironmentVariables": {"PATH": path},
