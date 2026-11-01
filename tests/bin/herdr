@@ -69,7 +69,9 @@ elif cmd == ["workspace", "create"]:
          "tab": {"tab_id": tab, "workspace_id": ws}, "root_pane": {"pane_id": pane, "tab_id": tab, "workspace_id": ws}})
 elif cmd == ["workspace", "list"]:
     out({"type": "workspace_list", "workspaces": [
-        {"workspace_id": k, "label": v["label"]} for k, v in world["workspaces"].items()]})
+        {"workspace_id": k, "label": v["label"],
+         "tab_count": sum(1 for x in world["tabs"].values() if x.get("workspace_id") == k)}
+        for k, v in world["workspaces"].items()]})
 elif cmd == ["workspace", "rename"]:
     world["workspaces"].setdefault(argv[2], {})["label"] = " ".join(argv[3:])
     out({"type": "ok"})
@@ -99,16 +101,27 @@ elif cmd == ["agent", "start"]:
     out({"type": "agent_started", "agent": {"name": name, "pane_id": pane}})
 elif cmd == ["pane", "move"]:
     old_pane = argv[2]
-    ws = new_id("w")
+    old_ws = next((v["workspace_id"] for v in world["tabs"].values() if v.get("pane_id") == old_pane), None)
+    if "--new-tab" in argv:
+        ws = opt("--workspace")
+        tab_label = opt("--label") or "1"
+    else:
+        ws = new_id("w")
+        world["workspaces"][ws] = {"label": opt("--label")}
+        tab_label = opt("--tab-label") or "1"
     tab, pane = f"{ws}:{new_id('t')}", f"{ws}:{new_id('p')}"
-    world["workspaces"][ws] = {"label": opt("--label")}
     world["tabs"] = {k: v for k, v in world["tabs"].items() if v.get("pane_id") != old_pane}
-    world["tabs"][tab] = {"label": "1", "workspace_id": ws, "pane_id": pane}
+    world["tabs"][tab] = {"label": tab_label, "workspace_id": ws, "pane_id": pane}
     for a in world["agents"]:
         if a.get("pane_id") == old_pane:
             a.update(pane_id=pane, tab_id=tab, workspace_id=ws)
-    out({"type": "pane_move", "move_result": {"created_workspace": {"workspace_id": ws},
-         "pane": {"pane_id": pane, "tab_id": tab, "workspace_id": ws}}})
+    result = {"pane": {"pane_id": pane, "tab_id": tab, "workspace_id": ws}}
+    if "--new-tab" not in argv:
+        result["created_workspace"] = {"workspace_id": ws}
+    if old_ws and not any(v.get("workspace_id") == old_ws for v in world["tabs"].values()):
+        world["workspaces"].pop(old_ws, None)  # herdr closes a workspace whose last pane moved out
+        result["closed_workspace_id"] = old_ws
+    out({"type": "pane_move", "move_result": result})
 elif cmd == ["pane", "read"]:
     print(world.get("screens", {}).get(argv[2], "────\n❯ \n────\n  status line"))
     json.dump(world, open(path, "w"))

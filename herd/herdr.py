@@ -67,9 +67,18 @@ class Herdr:
 
     def pane_move_to_new_workspace(self, pane_id: str, label: str) -> dict:
         """Move a pane (and the chat running in it) into a fresh workspace; its ids change."""
-        r = self.call("pane", "move", pane_id, "--new-workspace", "--label", label, "--no-focus")["move_result"]
+        r = self.call("pane", "move", pane_id, "--new-workspace", "--label", label, "--tab-label", label,
+                      "--no-focus")["move_result"]
         return {"workspace_id": r["created_workspace"]["workspace_id"], "pane_id": r["pane"]["pane_id"],
                 "tab_id": r["pane"]["tab_id"]}
+
+    def pane_move_to_workspace(self, pane_id: str, workspace_id: str, tab_label: str) -> dict:
+        """Move a pane into a new tab of an existing workspace. Herdr closes the workspace it left if that
+        workspace is now empty, and reports it as closed_workspace_id."""
+        r = self.call("pane", "move", pane_id, "--new-tab", "--workspace", workspace_id, "--label", tab_label,
+                      "--no-focus")["move_result"]
+        return {"pane_id": r["pane"]["pane_id"], "tab_id": r["pane"]["tab_id"],
+                "closed_workspace_id": r.get("closed_workspace_id")}
 
     def agent_start(self, name: str, pane_id: str, claude_args: list) -> None:
         """A freshly created tab's shell can still be starting (slow under load, e.g. several spawns in a row);

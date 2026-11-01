@@ -17,6 +17,7 @@ def orch(fake, monkeypatch, tmp_path):
               tabs={"w1:t1": {"label": "1", "workspace_id": "w1", "pane_id": "w1:p1"}},
               agents=[{"agent": "claude", "pane_id": "w1:p1", "tab_id": "w1:t1", "agent_status": "working",
                        "agent_session": {"kind": "id", "value": "orch-sid"}}])
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")  # claude sets it; the moved pane's HERDR_* go stale
     assert cli.main(["init", "fc: postiz", "--name", "Herta and agent messaging"]) == 0
     brief = tmp_path / "brief.md"
     brief.write_text("Write the drip copy.")
@@ -36,10 +37,42 @@ def test_init_records_orchestrator_and_labels_workspace(fake, orch):
     assert fake.world()["tabs"]["w1:t1"]["label"] == "◆ fc: postiz"
 
 
-def test_init_refuses_when_this_chat_already_runs_a_herd(fake, orch, monkeypatch, capsys):
+def test_init_refuses_while_this_chats_herd_has_open_sheepdogs(fake, orch, monkeypatch, capsys):
+    spawn(orch)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")
     assert cli.main(["init", "other"]) == 1
     assert "already is the shepherd of fc-postiz" in capsys.readouterr().err
+
+
+def test_init_in_a_chat_whose_herd_is_done_stays_in_its_workspace(fake, orch, tmp_path, monkeypatch, capsys):
+    spawn(orch)
+    (tmp_path / "h.txt").write_text("done")
+    cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
+    cli.main(["close", "Drip"])
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")
+    capsys.readouterr()
+    assert cli.main(["init", "next round"]) == 0
+    assert "retired fc-postiz" in capsys.readouterr().out
+    assert not any(c[:2] == ["pane", "move"] for c in fake.calls())
+    assert reg().data["retired_at"] and reg().data["workspace_id"] is None
+    nxt = Registry.load("next-round")
+    assert nxt.data["workspace_id"] == "w1" and nxt.data["orchestrator"]["pane_id"] == "w1:p1"
+    assert cli.main(["status"]) == 0 and "next round" in capsys.readouterr().out
+
+
+def test_init_keeps_the_name_of_a_busy_workspace(fake, monkeypatch):
+    monkeypatch.setenv("HERDR_WORKSPACE_ID", "w1")
+    monkeypatch.setenv("HERDR_PANE_ID", "w1:p1")
+    tabs = {f"w1:t{i}": {"label": f"chat {i}", "workspace_id": "w1", "pane_id": f"w1:p{i}"} for i in range(1, 6)}
+    fake.seed(workspaces={"w1": {"label": "pink ladies"}}, tabs=tabs,
+              agents=[{"agent": "claude", "pane_id": "w1:p1", "tab_id": "w1:t1", "agent_status": "working",
+                       "agent_session": {"kind": "id", "value": "orch-sid"}}])
+    assert cli.main(["init", "fc: postiz"]) == 0
+    assert fake.world()["workspaces"]["w1"]["label"] == "pink ladies"
+    r = reg()
+    assert r.data["workspace_id"] != "w1" and r.data["home"]["workspace_id"] == "w1"
+    assert fake.world()["workspaces"][r.data["workspace_id"]]["label"] == "◆ fc: postiz"
+    assert fake.world()["tabs"][r.data["orchestrator"]["tab_id"]]["label"] == "◆ fc: postiz"
 
 
 def second_chat_in_w1(fake, keep_first=False):
@@ -62,7 +95,6 @@ def test_init_moves_to_a_new_workspace_while_the_old_herd_has_open_workers(fake,
     spawn(orch)
     second_chat_in_w1(fake)
     assert init_from_second_chat(monkeypatch) == 0
-    assert "moved this chat to new workspace" in capsys.readouterr().out
     new = Registry.load("other")
     assert new.data["workspace_id"] not in (None, "w1")
     assert new.data["orchestrator"]["pane_id"] != "w1:p2"
@@ -70,7 +102,7 @@ def test_init_moves_to_a_new_workspace_while_the_old_herd_has_open_workers(fake,
     assert reg().data["workspace_id"] == "w1"
 
 
-def test_init_moves_while_the_old_orchestrator_was_active_recently(fake, orch, tmp_path, monkeypatch, capsys):
+def test_init_takes_a_done_herds_workspace_even_if_its_shepherd_was_active_recently(fake, orch, tmp_path, monkeypatch, capsys):
     spawn(orch)
     (tmp_path / "h.txt").write_text("done")
     cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
@@ -80,8 +112,18 @@ def test_init_moves_while_the_old_orchestrator_was_active_recently(fake, orch, t
     (d / "orch-sid.jsonl").write_text("{}\n")  # written just now
     second_chat_in_w1(fake)
     assert init_from_second_chat(monkeypatch) == 0
-    assert "moved" in capsys.readouterr().out
-    assert reg().data["workspace_id"] == "w1"
+    assert "took workspace w1" in capsys.readouterr().out
+    assert Registry.load("other").data["workspace_id"] == "w1"
+
+
+def test_init_moves_while_a_done_herds_other_shepherd_is_mid_turn(fake, orch, tmp_path, monkeypatch, capsys):
+    spawn(orch)
+    (tmp_path / "h.txt").write_text("done")
+    cli.main(["handoff", "Drip", "--file", str(tmp_path / "h.txt")])
+    cli.main(["close", "Drip"])
+    second_chat_in_w1(fake, keep_first=True)  # the fc-postiz chat is still working
+    assert init_from_second_chat(monkeypatch) == 0
+    assert "moved this chat to new workspace" in capsys.readouterr().out
 
 
 def test_init_takes_the_workspace_of_a_stale_herd(fake, orch, tmp_path, monkeypatch, capsys):
@@ -128,7 +170,7 @@ def test_restore_of_a_retired_orchestrator_builds_a_new_workspace(fake, orch, mo
     cli.retire(reg())
     before = len(fake.calls())
     assert cli.main(["restore", "fc-postiz", "--all"]) == 0
-    assert any(c[:2] == ["workspace", "create"] for c in fake.calls()[before:])
+    assert any(c[:2] == ["pane", "move"] for c in fake.calls()[before:])  # the live shepherd moves, no empty shell
     assert reg().data["workspace_id"] not in (None, "w1")
 
 
@@ -151,6 +193,7 @@ def test_adopt_refuses_while_old_chat_runs(fake, orch, monkeypatch, capsys):
                             "agent_session": {"kind": "id", "value": "new-sid"}})
     fake.seed(agents=world["agents"])
     monkeypatch.setenv("HERDR_PANE_ID", "w1:p2")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "new-sid")
     assert cli.main(["adopt", "fc-postiz"]) == 1
     assert "still running" in capsys.readouterr().err
     assert reg().data["orchestrator"]["session_id"] == "orch-sid"
@@ -480,6 +523,7 @@ def test_commands_use_the_orchestrators_own_herdr_server(fake, orch, monkeypatch
     r.data["herdr_socket"] = "/tmp/ple.sock"
     r.save()
     monkeypatch.setenv("HERDR_SOCKET_PATH", "/tmp/default.sock")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")  # run from some other chat, not the shepherd
     monkeypatch.setenv("FAKE_HERDR_LOG_SOCKET", "1")
     before = len(fake.calls())
     assert cli.main(["sync", "--orch", "fc-postiz"]) == 0
@@ -491,6 +535,7 @@ def test_same_workspace_id_in_another_herdr_server_is_not_this_orchestrator(fake
     r.data["herdr_socket"] = "/tmp/ple.sock"
     r.save()
     monkeypatch.setenv("HERDR_SOCKET_PATH", "/tmp/default.sock")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     assert cli.main(["status"]) == 1
     assert "no shepherd" in capsys.readouterr().err
 
@@ -564,6 +609,87 @@ def test_rehome_refuses_while_workers_still_run_in_the_old_herdr_session(fake, o
 
 
 def test_init_from_a_moved_orchestrator_points_to_adopt(fake, orch, tmp_path, monkeypatch, capsys):
+    spawn(orch)
     orchestrator_moved_to(fake, monkeypatch, tmp_path)
     assert cli.main(["init", "other"]) == 1
     assert "herd adopt fc-postiz" in capsys.readouterr().err
+
+
+def busy_home(fake, monkeypatch):
+    """The shepherd chat starts in w1, a workspace with five other chats in it."""
+    monkeypatch.setenv("HERDR_WORKSPACE_ID", "w1")
+    monkeypatch.setenv("HERDR_PANE_ID", "w1:p1")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")
+    tabs = {f"w1:t{i}": {"label": f"chat {i}", "workspace_id": "w1", "pane_id": f"w1:p{i}"} for i in range(1, 6)}
+    fake.seed(workspaces={"w1": {"label": "pink ladies"}}, tabs=tabs,
+              agents=[{"agent": "claude", "pane_id": "w1:p1", "tab_id": "w1:t1", "agent_status": "working",
+                       "agent_session": {"kind": "id", "value": "orch-sid"}}])
+    assert cli.main(["init", "fc: postiz"]) == 0
+
+
+def finish(tmp_path, label="Drip"):
+    (tmp_path / "h.txt").write_text(f"HERD HANDOFF {label}")
+    assert cli.main(["handoff", label, "--file", str(tmp_path / "h.txt")]) == 0
+    assert cli.main(["close", label]) == 0
+
+
+def test_closing_the_last_sheepdog_takes_the_shepherd_home(fake, monkeypatch, tmp_path, capsys):
+    busy_home(fake, monkeypatch)
+    herd_ws = reg().data["workspace_id"]
+    brief = tmp_path / "b.md"
+    brief.write_text("x")
+    for label in ("Drip", "Copy"):
+        assert cli.main(["spawn", label, "--model", "opus", "--why", "x", "--brief", str(brief)]) == 0
+    assert reg().worker("drip")["tab_id"].startswith(herd_ws + ":")
+    finish(tmp_path, "Drip")
+    assert reg().data["workspace_id"] == herd_ws  # Copy is still open
+    capsys.readouterr()
+    finish(tmp_path, "Copy")
+    assert "moved back to workspace w1" in capsys.readouterr().out
+    r, world = reg(), fake.world()
+    assert r.data["workspace_id"] is None and herd_ws not in world["workspaces"]
+    assert world["tabs"][r.data["orchestrator"]["tab_id"]] == {"label": "chat 1", "workspace_id": "w1",
+                                                              "pane_id": r.data["orchestrator"]["pane_id"]}
+    assert world["workspaces"]["w1"]["label"] == "pink ladies"
+
+
+def test_spawning_from_home_moves_the_shepherd_out_again(fake, monkeypatch, tmp_path, capsys):
+    busy_home(fake, monkeypatch)
+    brief = tmp_path / "b.md"
+    brief.write_text("x")
+    cli.main(["spawn", "Drip", "--model", "opus", "--why", "x", "--brief", str(brief)])
+    finish(tmp_path)
+    assert cli.main(["spawn", "Next", "--model", "opus", "--why", "x", "--brief", str(brief)]) == 0
+    r = reg()
+    assert r.data["workspace_id"] not in (None, "w1")
+    assert r.worker("next")["tab_id"].startswith(r.data["workspace_id"] + ":")
+    assert r.data["orchestrator"]["tab_id"].startswith(r.data["workspace_id"] + ":")
+
+
+def test_a_solo_shepherd_stays_put_and_gets_its_names_back(fake, orch, tmp_path, capsys):
+    assert fake.world()["workspaces"]["w1"]["label"] == "◆ fc: postiz"
+    spawn(orch)
+    capsys.readouterr()
+    finish(tmp_path)
+    assert "old names back" in capsys.readouterr().out
+    assert fake.world()["workspaces"]["w1"]["label"] == "old"
+    assert fake.world()["tabs"]["w1:t1"]["label"] == "1"
+    spawn(orch, "Next")
+    assert fake.world()["workspaces"]["w1"]["label"] == "◆ fc: postiz"
+    assert not any(c[:2] == ["pane", "move"] for c in fake.calls())
+
+
+def test_shepherd_stays_when_its_home_workspace_is_gone(fake, monkeypatch, tmp_path, capsys):
+    busy_home(fake, monkeypatch)
+    herd_ws = reg().data["workspace_id"]
+    brief = tmp_path / "b.md"
+    brief.write_text("x")
+    cli.main(["spawn", "Drip", "--model", "opus", "--why", "x", "--brief", str(brief)])
+    world = fake.world()
+    world["workspaces"].pop("w1")
+    world["tabs"] = {k: v for k, v in world["tabs"].items() if v["workspace_id"] != "w1"}
+    fake.seed(**world)
+    capsys.readouterr()
+    finish(tmp_path)
+    assert "is gone, so the shepherd stays" in capsys.readouterr().out
+    assert reg().data["workspace_id"] == herd_ws

@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from herd.herdr import Herdr, HerdrError
@@ -15,7 +14,7 @@ from herd.registry import Registry, RegistryError, new_worker, now, slugify, sta
 
 MODEL_IDS = {"opus": "claude-opus-5-5", "fable": "claude-fable-5-1"}
 REVIEW = "👀 "
-STALE_HOURS = 3  # an orchestrator idle this long with every worker closed gives up its workspace to a new herd
+RENAME_MAX_TABS = 3  # herd relabels a workspace only while it holds this few tabs; busier ones keep Eddy's name
 OPEN_STATES = ("live", "handed-off", "review", "detached")
 
 
@@ -140,10 +139,11 @@ def registry_of_session(sid):
     so a chat's own session id is the reliable key."""
     if not sid:
         return None
-    for r in Registry.all():
-        if r.data["orchestrator"].get("session_id") == sid or any(w["session_id"] == sid for w in r.data["workers"]):
-            return r
-    return None
+    mine = [r for r in Registry.all()
+            if r.data["orchestrator"].get("session_id") == sid or any(w["session_id"] == sid for w in r.data["workers"])]
+    # one chat can shepherd several herds in turn: the current one is not retired, and the newest
+    mine.sort(key=lambda r: (not r.data.get("retired_at"), r.data.get("created_at", "")))
+    return mine[-1] if mine else None
 
 
 def current_registry(slug=None) -> Registry:
@@ -209,24 +209,16 @@ def open_workers(r: Registry) -> list:
     return [w["label"] for w in r.data["workers"] if w["status"] in OPEN_STATES]
 
 
-def last_activity(r: Registry, h: Herdr) -> float:
-    """Newest transcript write by the shepherd chat (its recorded session, or whatever session now runs in
-    its pane, since /clear starts a new one). 0 when nothing is found."""
-    o = r.data["orchestrator"]
-    sids = {o.get("session_id")}
-    sids |= {(a.get("agent_session") or {}).get("value") for a in h.agents() if a.get("pane_id") == o.get("pane_id")}
-    times = [f.stat().st_mtime for sid in sids if sid for f in projects_dir().glob(f"*/{sid}.jsonl")]
-    return max(times, default=0)
-
-
 def stale(r: Registry, h: Herdr):
-    """Why this herd may give up its workspace, or None while it is still in use."""
+    """Why this herd may give up its workspace, or None while it is still in use. A herd whose sheepdogs are all
+    closed is done; only a different shepherd chat mid-turn (it may be about to spawn) keeps it."""
     if any(w["status"] not in ("closed", "failed") for w in r.data["workers"]):
         return None
-    if any(a.get("agent_status") == "working" for a in h.agents() if a.get("pane_id") == r.data["orchestrator"].get("pane_id")):
+    o = r.data["orchestrator"]
+    if o.get("session_id") != my_session_id() and any(
+            a.get("agent_status") == "working" for a in h.agents() if a.get("pane_id") == o.get("pane_id")):
         return None
-    idle = (time.time() - last_activity(r, h)) / 3600
-    return f"every sheepdog closed and its shepherd idle {idle:.0f}h" if idle >= STALE_HOURS else None
+    return "every sheepdog closed"
 
 
 def retire(r: Registry) -> None:
@@ -234,6 +226,14 @@ def retire(r: Registry) -> None:
     r.data["workspace_id"] = None
     r.data["retired_at"] = now()
     r.save()
+
+
+def label_workspace(h: Herdr, ws: str, label: str) -> None:
+    """Name the workspace after the herd only while it is small (RENAME_MAX_TABS tabs or fewer). A workspace
+    with many chats already has a name Eddy chose for that area; the shepherd's own tab carries the herd label."""
+    tabs = next((w.get("tab_count") for w in h.workspaces() if w["workspace_id"] == ws), None)
+    if tabs is not None and tabs <= RENAME_MAX_TABS:
+        h.workspace_rename(ws, label)
 
 
 def make_room(r: Registry, h: Herdr, ws: str, pane: str, mine: dict, socket):
@@ -255,6 +255,61 @@ def make_room(r: Registry, h: Herdr, ws: str, pane: str, mine: dict, socket):
     r.data["orchestrator"].update(pane_id=pane, tab_id=tab)
     print(f"workspace {ws} belongs to {other.slug}, which is still in use; moved this chat to new workspace {new_ws}")
     return new_ws, {**mine, "pane_id": pane, "tab_id": tab}
+
+
+def go_out(r: Registry, h: Herdr) -> str:
+    """Move the shepherd chat into a workspace of its own, `◆ <label>`, where its sheepdogs' tabs open.
+    Every herd works in its own workspace, so Eddy's workspaces are never relabelled or crowded."""
+    o = r.data["orchestrator"]
+    moved = h.pane_move_to_new_workspace(o["pane_id"], f"◆ {r.data['label']}")
+    r.data["workspace_id"] = moved["workspace_id"]
+    o.update(pane_id=moved["pane_id"], tab_id=moved["tab_id"])
+    r.save()
+    return moved["workspace_id"]
+
+
+def label_here(r: Registry, h: Herdr) -> None:
+    """A solo shepherd's own workspace and tab carry the herd label while it has sheepdogs."""
+    o = r.data["orchestrator"]
+    h.workspace_rename(r.data["workspace_id"], f"◆ {r.data['label']}")
+    if o.get("tab_id"):
+        h.tab_rename(o["tab_id"], f"◆ {r.data['label']}")
+    r.data["home"]["returned"] = False
+    r.save()
+
+
+def go_home(r: Registry, h: Herdr):
+    """Every sheepdog is closed: move the shepherd chat back to the workspace it started in, under its old tab
+    name. Herdr closes the herd workspace once it is empty. Returns a line for Eddy, or None if it stays put."""
+    home = r.data.get("home") or {}
+    o = r.data["orchestrator"]
+    if open_workers(r) or not home.get("workspace_id") or not r.data.get("workspace_id"):
+        return None
+    if r.data["workspace_id"] == home["workspace_id"]:
+        if not home.get("solo") or home.get("returned"):
+            return None
+        if home.get("workspace_label"):
+            h.workspace_rename(home["workspace_id"], home["workspace_label"])
+        if home.get("tab_label") and o.get("tab_id"):
+            h.tab_rename(o["tab_id"], home["tab_label"])
+        home["returned"] = True
+        r.save()
+        return "every sheepdog closed: the workspace and the shepherd's tab have their old names back"
+    if home["workspace_id"] not in {w["workspace_id"] for w in h.workspaces()}:
+        return f"its home workspace {home['workspace_id']} is gone, so the shepherd stays in {r.data['workspace_id']}"
+    if o.get("session_id") not in h.live_sessions():
+        return None
+    herd_ws = r.data["workspace_id"]
+    moved = h.pane_move_to_workspace(o["pane_id"], home["workspace_id"], home.get("tab_label") or f"◆ {r.data['label']}")
+    o.update(pane_id=moved["pane_id"], tab_id=moved["tab_id"])
+    r.data["workspace_id"] = None  # at home; the next spawn moves it out again
+    r.save()
+    left = "" if moved.get("closed_workspace_id") == herd_ws else f"; workspace {herd_ws} still has other tabs, so it stays"
+    return f"every sheepdog closed: the shepherd moved back to workspace {home['workspace_id']}{left}"
+
+
+def at_home(r: Registry, ws: str) -> bool:
+    return r.data.get("workspace_id") is None and (r.data.get("home") or {}).get("workspace_id") == ws
 
 
 def old_server_sessions(r: Registry, socket) -> dict:
@@ -303,6 +358,11 @@ def rehome(r: Registry):
     if (ws, pane, socket) == (was, o.get("pane_id"), r.data.get("herdr_socket")) and (
             Path(r.data.get("cwd") or cwd).exists()):
         return None
+    if at_home(r, ws) and socket == r.data.get("herdr_socket") and Path(r.data.get("cwd") or cwd).exists():
+        if pane != o.get("pane_id"):
+            o.update(pane_id=pane, tab_id=mine.get("tab_id"))
+            r.save()
+        return None
     refuse_stranded(r, old_server_sessions(r, socket))
     o.update(pane_id=pane, tab_id=mine.get("tab_id"))
     r.data["herdr_socket"] = socket
@@ -310,7 +370,7 @@ def rehome(r: Registry):
     move_cwd(r, cwd)
     ws, mine = make_room(r, h, ws, pane, mine, socket)
     r.save()
-    h.workspace_rename(ws, f"◆ {r.data['label']}")
+    label_workspace(h, ws, f"◆ {r.data['label']}")
     if mine.get("tab_id"):
         h.tab_rename(mine["tab_id"], f"◆ {r.data['label']}")
     return f"moved {r.slug} to where this chat runs now: workspace {was} to {ws}, folder {r.data['cwd']}"
@@ -320,18 +380,35 @@ def cmd_init(a) -> None:
     h = Herdr()
     ws, pane, mine, sid = own_pane(h)
     mine_already = registry_of_session(sid)
-    if mine_already and mine_already.data["orchestrator"].get("session_id") == sid:
-        raise HerdError(f"this chat already is the shepherd of {mine_already.slug}; "
-                        f"if it moved, run herd adopt {mine_already.slug} to point the herd here")
+    if mine_already and mine_already.data["orchestrator"].get("session_id") == sid and not mine_already.data.get("retired_at"):
+        left = open_workers(mine_already)
+        if left:
+            raise HerdError(f"this chat already is the shepherd of {mine_already.slug}, which still has open sheepdogs "
+                            f"({', '.join(left)}); close them first, or run herd adopt {mine_already.slug} if it moved")
+        retire(mine_already)  # its sheepdogs are all closed: that herd is done, this chat starts the next one here
+        print(f"retired {mine_already.slug} (every sheepdog closed); it stays restorable")
     socket = os.environ.get("HERDR_SOCKET_PATH")
-    r = Registry.create(a.label, workspace_id=ws, cwd=(mine.get("cwd") or os.getcwd()), orchestrator={
+    r = Registry.create(a.label, workspace_id=None, cwd=(mine.get("cwd") or os.getcwd()), orchestrator={
         "name": live_name(sid) or a.name or "", "session_id": sid, "model": a.model, "pane_id": pane, "tab_id": mine.get("tab_id")})
     r.data["herdr_socket"] = socket
-    ws, mine = make_room(r, h, ws, pane, mine, socket)
+    tabs = h.tabs()
+    tab_label = next((t.get("label") for t in tabs if t["tab_id"] == mine.get("tab_id")), None)
+    solo = [t["tab_id"] for t in tabs if t.get("workspace_id") == ws] == [mine.get("tab_id")]
+    ws_label = next((w.get("label") for w in h.workspaces() if w["workspace_id"] == ws), None)
+    r.data["home"] = {"workspace_id": ws, "tab_label": tab_label, "workspace_label": ws_label, "solo": solo}
     r.save()
-    h.workspace_rename(ws, f"◆ {a.label}")
-    if mine.get("tab_id"):
-        h.tab_rename(mine["tab_id"], f"◆ {a.label}")
+    if solo:
+        # the chat's tab is its workspace's only one: moving it out would close the workspace it returns to,
+        # so the herd works here and the names go back when every sheepdog is closed
+        ws, mine = make_room(r, h, ws, pane, mine, socket)
+        r.save()
+        if r.data["workspace_id"] == ws and r.data["home"]["workspace_id"] == ws:
+            label_here(r, h)
+        else:
+            r.data["home"]["solo"] = False  # make_room moved it out after all
+            r.save()
+    else:
+        ws = go_out(r, h)
     name = ensure_shepherd_name(r, h)
     print(f"shepherd {r.slug} in {ws} (session {sid}, SendMessage name {name!r})")
 
@@ -361,7 +438,7 @@ def cmd_adopt(a) -> None:
     r.data.pop("retired_at", None)
     ws, mine = make_room(r, h, ws, pane, mine, socket)
     r.save()
-    h.workspace_rename(ws, f"◆ {r.data['label']}")
+    label_workspace(h, ws, f"◆ {r.data['label']}")
     if mine.get("tab_id"):
         h.tab_rename(mine["tab_id"], f"◆ {r.data['label']}")
     name = ensure_shepherd_name(r, h)
@@ -385,6 +462,10 @@ def cmd_spawn(a) -> None:
         if x.get("tab_id") in open_tabs:
             h.tab_close(x["tab_id"])
     r.data["workers"] = [x for x in r.data["workers"] if x not in same]
+    if not r.data.get("workspace_id"):
+        print(f"shepherd moved to its herd workspace {go_out(r, h)}")
+    elif (r.data.get("home") or {}).get("returned"):
+        label_here(r, h)
     w = new_worker(r, a.label, model=a.model, why=a.why, cwd=str(Path(a.cwd or r.data["cwd"]).expanduser()), brief="")
     briefs = state_dir() / r.slug / "briefs"
     briefs.mkdir(parents=True, exist_ok=True)
@@ -464,6 +545,9 @@ def cmd_close(a) -> None:
     w["closed_at"] = now()
     r.save()
     print(f"closed {w['label']} (restore with: herd restore {r.slug} {w['slug']})")
+    back = go_home(r, h)
+    if back:
+        print(back)
 
 
 def sync(r: Registry, h: Herdr) -> list:
@@ -490,11 +574,20 @@ def cmd_sync(a) -> None:
     print(f"detached: {', '.join(changed)}" if changed else "in sync")
 
 
+def where(r: Registry) -> str:
+    if r.data.get("workspace_id"):
+        return r.data["workspace_id"]
+    if r.data.get("retired_at"):
+        return "retired"
+    home = (r.data.get("home") or {}).get("workspace_id")
+    return f"home {home}" if home else "none"
+
+
 def cmd_status(a) -> None:
     r = current_registry(a.orch)
     o = r.data["orchestrator"]
     running = "" if refresh_orchestrator(r) else ", not running"
-    print(f"◆ {r.data['label']}  [{r.slug}]  workspace {r.data['workspace_id']}  shepherd {o.get('name')} ({o.get('model')}{running})")
+    print(f"◆ {r.data['label']}  [{r.slug}]  workspace {where(r)}  shepherd {o.get('name')} ({o.get('model')}{running})")
     for w in r.data["workers"]:
         last = (w.get("handoff") or {}).get("text", "").splitlines()
         tail = last[1] if len(last) > 1 else (last[0] if last else "")
@@ -506,7 +599,7 @@ def cmd_ls(a) -> None:
         for w in r.data["workers"]:
             counts[w["status"]] = counts.get(w["status"], 0) + 1
         summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no sheepdogs"
-        print(f"{r.slug:<28} {r.data['label']:<32} {r.data.get('workspace_id') or 'retired':<8} {summary}")
+        print(f"{r.slug:<28} {r.data['label']:<32} {where(r):<8} {summary}")
 
 
 def restore_one(r: Registry, include_closed: bool, labels: list) -> None:
@@ -515,7 +608,10 @@ def restore_one(r: Registry, include_closed: bool, labels: list) -> None:
     names = {a.get("name") for a in h.agents() if a.get("name")}
     ws_ids = {x["workspace_id"] for x in h.workspaces()}
     o = r.data["orchestrator"]
-    if r.data["workspace_id"] not in ws_ids:
+    if r.data["workspace_id"] not in ws_ids and o.get("session_id") in live:
+        o["pane_id"] = live[o["session_id"]]["pane_id"]
+        print(f"moved the shepherd to workspace {go_out(r, h)} for {r.slug}")
+    elif r.data["workspace_id"] not in ws_ids:
         ws, tab, pane = h.workspace_create(f"◆ {r.data['label']}", r.data["cwd"])
         r.data["workspace_id"] = ws
         r.save()

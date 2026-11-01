@@ -73,7 +73,8 @@ class Registry:
 
     @classmethod
     def all(cls) -> list:
-        return [cls.load(p.stem) for p in sorted(state_dir().glob("*.json"))]
+        # reaper.json is the reaper's own state, not a herd.
+        return [cls.load(p.stem) for p in sorted(state_dir().glob("*.json")) if p.name != "reaper.json"]
 
     @classmethod
     def find_by_workspace(cls, workspace_id: str, herdr_socket=None):
