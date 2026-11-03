@@ -6,6 +6,7 @@ The two roles: the **queen** leads, the **bees** (workers) do the work. Not rela
 
 - Design: `docs/specs/2026-09-25-hive-design.md`
 - Skills: `skills/hive-queen`, `skills/hive-bee`
+- Herdr plugin: `plugins/move-tab` moves a tab to another workspace from a popup (`§ m`); see its README
 - State: `~/.local/state/hive/<queen>.json`, or `~/.local/state/herd/` on machines set up before the rename (override with `HIVE_STATE_DIR`)
 
 ## Install
