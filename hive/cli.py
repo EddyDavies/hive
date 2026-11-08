@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+from hive import drone
+from hive.drone import DroneError
 from hive.hc import Hc, HcError
 from hive.herdr import Herdr, HerdrError
 from hive.registry import Registry, RegistryError, new_worker, now, slugify, state_dir
@@ -928,6 +930,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--install", action="store_true", help="install the launchd job that runs this every minute")
     s.add_argument("--uninstall", action="store_true", help="remove the launchd job")
 
+    drone.add_parser(sub)
+
     for sp in sub.choices.values():
         sp.add_argument("--orch", help="queen slug (default: the one owning this workspace)")
     return p
@@ -941,7 +945,7 @@ def main(argv=None) -> int:
             args.orch, args.labels = args.labels[0], args.labels[1:]
     try:
         args.fn(args)
-    except (HiveError, HerdrError, HcError, RegistryError) as e:
+    except (HiveError, HerdrError, HcError, RegistryError, DroneError) as e:
         print(f"hive: {e}", file=sys.stderr)
         return 1
     return 0

@@ -5,7 +5,8 @@ A queen Claude chat spawns labelled bee chats in Herdr tabs, reads their SendMes
 The two roles: the **queen** leads, the **bees** (workers) do the work. Not related to aden-hive/hive, a separate agent runtime that also uses queens.
 
 - Design: `docs/specs/2026-09-25-hive-design.md`
-- Skills: `skills/hive-queen`, `skills/hive-bee`
+- Skills: `skills/hive-queen`, `skills/hive-bee`, `skills/hive-drone`
+- Drones: `hive drone launch` forks the chat you are in into a `✈ <label>` tab that takes one slice and carries on alone, then reports back by SendMessage. No queen needed. See `skills/hive-drone`
 - Herdr plugin: `plugins/undo-close` reopens a closed tab or pane (`§ t`, `§ shift+u`) and resumes its Claude chat on the same session, model and permission mode; ported from pedroloch/herdr-undo-close
 - Herdr plugin: `plugins/move-tab` moves a tab to another workspace from a popup (`§ m`); see its README
 - Remote bees: `--on <machine>` runs the bee as a herdr-core (`hc`) terminal on a saved machine, with a Mac tab attached to it; its handoff comes back as a file read by `hive wait`, `hive status` or `hive sync`. Design: `docs/plans/2026-11-08-hive-on-machine.md`
@@ -30,6 +31,19 @@ hive handoff "drip copy" --file handoff.txt
 hive close "drip copy"          # refuses without a handoff or while working
 hive restore [--all | --every]
 ```
+
+## Drones (from any chat, inside a Herdr pane)
+
+```
+hive drone launch "failure experience" --task task.md [--model opus|fable] [--fresh]
+hive drone ls [--all]           # open drones and their report summaries
+hive drone show "failure experience"
+hive drone report --file r.txt  # run by the drone; prints the parent's SendMessage name
+hive drone land "failure experience"     # refuses without a report or while it works
+hive drone restore "failure experience"
+```
+
+A drone is a fork (`claude --resume <parent> --fork-session`), so it starts with the whole conversation; the task file only names its slice. A fork starts in the folder the parent chat started in. Records: `~/.local/state/hive/drones/`.
 
 ## Reaper
 

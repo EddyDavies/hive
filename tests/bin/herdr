@@ -91,7 +91,7 @@ elif cmd == ["agent", "start"]:
     name, pane = argv[2], opt("--pane")
     extra = argv[argv.index("--") + 1:] if "--" in argv else []
     sid = None
-    for flag in ("--session-id", "--resume"):
+    for flag in ("--resume", "--session-id"):  # a fork passes both; its own id is --session-id
         if flag in extra:
             sid = extra[extra.index(flag) + 1]
     tab = next((k for k, v in world["tabs"].items() if v["pane_id"] == pane), None)
