@@ -8,6 +8,7 @@ The two roles: the **queen** leads, the **bees** (workers) do the work. Not rela
 - Skills: `skills/hive-queen`, `skills/hive-bee`
 - Herdr plugin: `plugins/undo-close` reopens a closed tab or pane (`§ t`, `§ shift+u`) and resumes its Claude chat on the same session, model and permission mode; ported from pedroloch/herdr-undo-close
 - Herdr plugin: `plugins/move-tab` moves a tab to another workspace from a popup (`§ m`); see its README
+- Remote bees: `--on <machine>` runs the bee as a herdr-core (`hc`) terminal on a saved machine, with a Mac tab attached to it; its handoff comes back as a file read by `hive wait`, `hive status` or `hive sync`. Design: `docs/plans/2026-11-08-hive-on-machine.md`
 - State: `~/.local/state/hive/<queen>.json`, or `~/.local/state/herd/` on machines set up before the rename (override with `HIVE_STATE_DIR`)
 
 ## Install
@@ -22,6 +23,8 @@ The two roles: the **queen** leads, the **bees** (workers) do the work. Not rela
 hive init "fc: postiz rollout"   # moves to a new workspace if this one belongs to a hive still in use
 hive adopt fc-postiz-rollout      # or: become an existing hive's orchestrator
 hive spawn "drip copy" --model opus --why "bounded copy" --brief brief.md
+hive spawn "long build" --model opus --why "outlives the Mac" --brief brief.md --on pally-workbox --cwd /home/ubuntu/code/app
+hive wait "long build"           # remote bee: block until it stops, print its handoff file
 hive status
 hive handoff "drip copy" --file handoff.txt
 hive close "drip copy"          # refuses without a handoff or while working

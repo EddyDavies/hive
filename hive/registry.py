@@ -125,6 +125,10 @@ def new_worker(reg: Registry, label: str, model: str, why: str, cwd: str, brief:
         "status": "starting",
         "tab_id": None,
         "pane_id": None,
+        "machine": None,  # hc machine name for a remote bee
+        "address": None,  # its hc terminal, machine/t7
+        "remote_brief": None,
+        "remote_handoff": None,
         "handoff": None,
         "error": None,
         "created_at": now(),

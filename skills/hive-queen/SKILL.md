@@ -46,6 +46,25 @@ Labels are 2 to 4 plain words that say what the work is (`drip copy`, `pricing r
 
 Spawn independent slices in parallel. Keep tightly coupled work in one bee or with you.
 
+## Remote bees (`--on <machine>`)
+
+A bee that must outlive the Mac (overnight work, travel, a heavy build) runs on a saved herdr-core machine instead of a tab here, for example Eddy's Pally workbox (`hc machine ls` names it):
+
+```
+hive spawn "<label>" --model opus|fable --why "<one line>" --brief <file> --on pally-workbox --cwd /home/ubuntu/code/<repo>
+```
+
+`--cwd` is required and is an absolute path on that machine; hive cannot expand `~` or relative paths there. The brief is copied over for you, so write it for a reader on that machine: remote paths, no references to files on this Mac. The bee's Claude runs in an hc terminal; a Mac tab labelled `o> <label> @<machine>` opens attached to it so Eddy can see it and take over (ctrl+\ detaches).
+
+A remote bee has no hive-bee skill and no SendMessage to you. Its kickoff tells it to write its HIVE HANDOFF to a file on that machine when done or stuck. You collect it with either:
+
+- `hive wait "<label>"`: blocks until the bee stops working (done, blocked, error, exit) or 180 s pass (`--timeout` to change), then prints the handoff, or the bee's screen when it is blocked with no handoff, or "still working". Run it in the background and keep working, the way you would for any slow command.
+- `hive status` or `hive sync`: refresh every remote bee from hc, record any handoff file that appeared, and mark a terminal that ended as detached.
+
+Close and restore work as for local bees: `hive close` refuses while the bee is working, then ends and removes its terminal and closes the Mac tab; `hive restore` resumes its Claude on the same machine and reopens the tab. Steer a live remote bee with `hc send <address> "..."`, not SendMessage; its address is in `hive status` output and the spawn line.
+
+Remote bees cannot start more bees, and the machine must stay on for their whole run: the Pally workbox stops itself when idle, and a live hc terminal counts as activity only once the workbox skill's idle check knows about hc.
+
 ## Handoffs
 
 A bee finishes by recording a handoff in the registry (`hive handoff`) and then sending you the same text:
@@ -120,5 +139,5 @@ Already open chats are skipped, never duplicated.
 
 - Keep a bee open just in case, or close one that still has an unclosed loop.
 - Point Eddy at a tab to read something; summarise it here.
-- Type into a bee's terminal with `herdr agent prompt` after spawn; use SendMessage.
+- Type into a local bee's terminal with `herdr agent prompt` after spawn; use SendMessage. A remote bee takes `hc send`.
 - Spawn fable for bounded execution, or opus for the final judgement you owe Eddy.

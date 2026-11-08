@@ -146,6 +146,12 @@ class Herdr:
             raise HerdrError(f"herdr pane read: {p.stderr.strip() or p.stdout.strip() or f'exit {p.returncode}'}")
         return p.stdout
 
+    def pane_run(self, pane_id: str, command: str) -> None:
+        """Type a command into a pane's shell and run it. Prints nothing on success, unlike the other commands."""
+        p = self.run("pane", "run", pane_id, command)
+        if p.returncode != 0:
+            raise HerdrError(f"herdr pane run: {p.stderr.strip() or p.stdout.strip() or f'exit {p.returncode}'}")
+
     def agent_prompt(self, name: str, text: str) -> None:
         self.call("agent", "prompt", name, text)
 
