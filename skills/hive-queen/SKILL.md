@@ -63,7 +63,7 @@ A remote bee has no hive-bee skill and no SendMessage to you. Its kickoff tells 
 
 Close and restore work as for local bees: `hive close` refuses while the bee is working, then ends and removes its terminal and closes the Mac tab; `hive restore` resumes its Claude on the same machine and reopens the tab. Steer a live remote bee with `hc send <address> "..."`, not SendMessage; its address is in `hive status` output and the spawn line.
 
-Remote bees cannot start more bees, and the machine must stay on for their whole run: the Pally workbox stops itself when idle, and a live hc terminal counts as activity only once the workbox skill's idle check knows about hc.
+Remote bees cannot start more bees, and the machine must stay on for their whole run. The Pally workbox stops itself after two idle hours; a live hc terminal counts as activity there, so a bee left open after its handoff keeps the box awake until `hive close` removes it.
 
 ## Handoffs
 
