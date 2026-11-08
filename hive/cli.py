@@ -4,11 +4,14 @@ labelled bee chats in Herdr tabs. See docs/specs/2026-09-25-hive-design.md."""
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+from hive.hc import Hc, HcError
 from hive.herdr import Herdr, HerdrError
 from hive.registry import Registry, RegistryError, new_worker, now, slugify, state_dir
 
@@ -16,6 +19,10 @@ MODEL_IDS = {"opus": "claude-opus-5-5", "fable": "claude-fable-5-1"}
 REVIEW = "👀 "
 RENAME_MAX_TABS = 3  # hive relabels a workspace only while it holds this few tabs; busier ones keep Eddy's name
 OPEN_STATES = ("live", "handed-off", "review", "detached")
+SETTLE_POLL = 1.0  # seconds between status checks on a remote bee that is starting
+SETTLE_FIRST = 20  # polls before hive looks for the folder trust dialog
+SETTLE_AFTER = 30  # polls for a status once the dialog is answered
+WAIT_TIMEOUT = 180  # hc's own default
 
 
 class HiveError(Exception):
@@ -24,6 +31,8 @@ class HiveError(Exception):
 
 def tab_label(w: dict) -> str:
     label = f"{w['model'][0]}> {w['label']}"
+    if w.get("machine"):
+        label += f" @{w['machine']}"
     return REVIEW + label if w["status"] == "review" else label
 
 
@@ -45,6 +54,31 @@ def kickoff(w: dict, orch_name: str) -> str:
             f'Your queen\'s SendMessage name is "{orch_name}". If a message to it cannot be '
             f'delivered, run `hive queen` for its current name. '
             f'Your brief is at {w["brief"]}. Read it and start.')
+
+
+def remote_kickoff(w: dict) -> str:
+    """A remote bee has no hive-bee skill and no queen it can message, so its kickoff carries the handoff
+    format and the file the queen reads it from."""
+    return (f'You are a hive bee named "{w["label"]}", running on machine {w["machine"]}, away from your queen. '
+            f'There is no hive-bee skill and no SendMessage here: never try to message the queen, and never ask '
+            f'who to report to. Your brief is at {w["remote_brief"]}. Read it in full; it is your whole scope. '
+            f'Do the work. Stop and report instead of improvising when the code or data does not match the brief, '
+            f'a command fails after one sensible retry, or the task needs files outside scope. '
+            f'When you are finished, or stopped, write this handoff to {w["remote_handoff"]} '
+            f'(create the folder if needed):\n\n'
+            f'HIVE HANDOFF {w["label"]}\n'
+            f'complete: yes|no (what remains, if no)\n'
+            f'review_worthy: yes|no (the decision or thing only Eddy can judge)\n'
+            f'summary: <3 to 6 lines: what you did and what you found>\n'
+            f'artifacts: <paths, urls, commits; or none>\n'
+            f'open: <loose ends, risks, things you could not verify; or none>\n\n'
+            f'Evidence over adjectives: file paths with line numbers, the commands you ran and their result, exact '
+            f'failures. Then stop and stay open; the queen reads the file and decides when you close.')
+
+
+def remote_command(args: list) -> list:
+    """The program hc starts on the machine: a login shell, so the box profile sets PATH and the Claude token."""
+    return ["bash", "-lc", "exec claude " + shlex.join(args)]
 
 
 def projects_dir() -> Path:
@@ -446,6 +480,75 @@ def cmd_adopt(a) -> None:
     print(f"adopted {r.slug} (SendMessage name {name!r})" + (f"; open bees: {', '.join(left)}" if left else ""))
 
 
+def check_machine(hc: Hc, machine: str, cwd) -> None:
+    if not cwd:
+        raise HiveError("a bee on another machine needs --cwd: an absolute path on that machine")
+    if not str(cwd).startswith("/"):
+        raise HiveError(f"--cwd {cwd!r} must be absolute on {machine}; hive cannot expand paths there")
+    names = [m["name"] for m in hc.machines()]
+    if machine not in names:
+        raise HiveError(f"no hc machine {machine!r}; hc machine ls knows: {', '.join(names) or 'none'} "
+                        f"(add one with: hc machine add <ssh host> --name {machine} --install)")
+
+
+def screen_tail(hc: Hc, address: str, lines: int = 12) -> str:
+    try:
+        text = hc.screen(address)
+    except HcError as e:
+        return f"(screen unreadable: {e})"
+    kept = [l.rstrip() for l in text.splitlines() if l.strip()]
+    return "\n".join(kept[-lines:])
+
+
+def settle_remote(hc: Hc, address: str) -> None:
+    """Wait for the remote Claude to report a status. A fresh folder shows a trust dialog first, which reports
+    nothing; hive answers it. Raises with the screen when nothing arrives."""
+    for _ in range(SETTLE_FIRST):
+        if hc.status(hc.get(address)) not in ("", "finished"):
+            return
+        time.sleep(SETTLE_POLL)
+    screen = screen_tail(hc, address)
+    if "trust" in screen.lower():
+        hc.keys(address, "down", "enter")
+        for _ in range(SETTLE_AFTER):
+            if hc.status(hc.get(address)) not in ("", "finished"):
+                return
+            time.sleep(SETTLE_POLL)
+        screen = screen_tail(hc, address)
+    raise HiveError(f"{address} never reported a status; its screen:\n{screen}")
+
+
+def start_remote(hc: Hc, h: Herdr, r: Registry, w: dict, args: list) -> None:
+    """Start the bee's Claude on its machine, settle it, then open a Mac tab attached to it."""
+    w["address"] = hc.start(w["machine"], w["cwd"], w["slug"], remote_command(args))
+    r.save()
+    settle_remote(hc, w["address"])
+    w["tab_id"], w["pane_id"] = h.tab_create(r.data["workspace_id"], tab_label(w), str(Path.home()))
+    r.save()
+    h.pane_run(w["pane_id"], f"hc attach {w['address']}")
+
+
+def spawn_remote(r: Registry, h: Herdr, w: dict, brief_text: str) -> None:
+    hc = Hc()
+    home = hc.home(w["machine"]).rstrip("/")
+    w["remote_brief"] = f"{home}/.local/state/hive/{r.slug}/briefs/{w['slug']}.md"
+    w["remote_handoff"] = f"{home}/.local/state/hive/{r.slug}/handoffs/{w['slug']}.txt"
+    r.save()
+    hc.write_file(w["machine"], w["remote_brief"], brief_text)
+    args = claude_args(w["session_id"], w["label"], w["model"], resume=False) + [remote_kickoff(w)]
+    try:
+        start_remote(hc, h, r, w, args)
+    except (HcError, HiveError, HerdrError):
+        if w.get("address"):  # never leave a half started bee on the box
+            try:
+                hc.kill(w["address"])
+                hc.rm(w["address"])
+            except HcError:
+                pass
+            w["address"] = None
+        raise
+
+
 def cmd_spawn(a) -> None:
     r = current_registry(a.orch)
     h = herdr_for(r)
@@ -453,6 +556,8 @@ def cmd_spawn(a) -> None:
     brief_src = Path(a.brief).expanduser()
     if not brief_src.is_file():
         raise HiveError(f"brief not found: {brief_src}")
+    if a.on:
+        check_machine(Hc(), a.on, a.cwd)
     same = [x for x in r.data["workers"] if x["label"].lower() == a.label.strip().lower()]
     if any(x["status"] != "failed" for x in same):
         raise HiveError(f"a bee labelled {a.label!r} already exists in {r.slug}; pick another label "
@@ -466,7 +571,9 @@ def cmd_spawn(a) -> None:
         print(f"queen moved to its hive workspace {go_out(r, h)}")
     elif (r.data.get("home") or {}).get("returned"):
         label_here(r, h)
-    w = new_worker(r, a.label, model=a.model, why=a.why, cwd=str(Path(a.cwd or r.data["cwd"]).expanduser()), brief="")
+    cwd = a.cwd if a.on else str(Path(a.cwd or r.data["cwd"]).expanduser())
+    w = new_worker(r, a.label, model=a.model, why=a.why, cwd=cwd, brief="")
+    w["machine"] = a.on
     briefs = state_dir() / r.slug / "briefs"
     briefs.mkdir(parents=True, exist_ok=True)
     w["brief"] = str(briefs / f"{w['slug']}.md")
@@ -474,11 +581,14 @@ def cmd_spawn(a) -> None:
     r.data["workers"].append(w)
     r.save()
     try:
-        w["tab_id"], w["pane_id"] = h.tab_create(r.data["workspace_id"], tab_label(w), w["cwd"])
-        r.save()
-        h.agent_start(w["slug"], w["pane_id"], claude_args(w["session_id"], w["label"], w["model"], resume=False))
-        h.agent_prompt(w["slug"], kickoff(w, orch_name))
-    except HerdrError as e:
+        if a.on:
+            spawn_remote(r, h, w, brief_src.read_text())
+        else:
+            w["tab_id"], w["pane_id"] = h.tab_create(r.data["workspace_id"], tab_label(w), w["cwd"])
+            r.save()
+            h.agent_start(w["slug"], w["pane_id"], claude_args(w["session_id"], w["label"], w["model"], resume=False))
+            h.agent_prompt(w["slug"], kickoff(w, orch_name))
+    except (HerdrError, HcError, HiveError) as e:
         set_status(w, "failed")
         w["error"] = str(e)
         if w.get("tab_id"):  # never leave an empty tab behind
@@ -491,7 +601,8 @@ def cmd_spawn(a) -> None:
         raise
     set_status(w, "live")
     r.save()
-    print(f"spawned {w['label']} as {w['slug']} on {w['model']} in {w['tab_id']} (session {w['session_id']})")
+    where_ = f"{w['address']} (tab {w['tab_id']})" if a.on else w["tab_id"]
+    print(f"spawned {w['label']} as {w['slug']} on {w['model']} in {where_} (session {w['session_id']})")
 
 
 def cmd_handoff(a) -> None:
@@ -536,9 +647,17 @@ def cmd_close(a) -> None:
     if not w.get("handoff") and not a.force:
         raise HiveError(f"{w['label']} has no handoff on record; record one first or pass --force")
     h = herdr_for(r)
-    agent = h.live_sessions().get(w["session_id"])
-    if agent and agent.get("agent_status") == "working":
-        raise HiveError(f"{w['label']} is still working; not closing")
+    if w.get("machine"):
+        hc = Hc()
+        if w.get("address") and hc.status(hc.get(w["address"])) == "working":
+            raise HiveError(f"{w['label']} is still working on {w['machine']}; not closing")
+        if w.get("address"):
+            hc.kill(w["address"])
+            hc.rm(w["address"])
+    else:
+        agent = h.live_sessions().get(w["session_id"])
+        if agent and agent.get("agent_status") == "working":
+            raise HiveError(f"{w['label']} is still working; not closing")
     if w.get("tab_id") and any(t["tab_id"] == w["tab_id"] for t in h.tabs()):
         h.tab_close(w["tab_id"])
     set_status(w, "closed")
@@ -550,10 +669,37 @@ def cmd_close(a) -> None:
         print(back)
 
 
+def sync_remote(r: Registry, hc: Hc = None) -> list:
+    """Mirror each remote bee's hc terminal into the registry: a finished or vanished terminal is detached, a
+    live one is back, and a handoff file the bee wrote becomes its recorded handoff. Returns the detached labels."""
+    changed = []
+    remote = [w for w in r.data["workers"] if w.get("machine") and w["status"] in OPEN_STATES and w.get("address")]
+    if not remote:
+        return changed
+    hc = hc or Hc()
+    for w in remote:
+        alive = hc.status(hc.get(w["address"])) != "finished"
+        if not alive and w["status"] != "detached":
+            set_status(w, "detached")
+            changed.append(w["label"])
+        elif alive and w["status"] == "detached":
+            set_status(w, "handed-off" if w.get("handoff") else "live")
+        if alive and not w.get("handoff") and w.get("remote_handoff"):
+            text = hc.read_file(w["machine"], w["remote_handoff"])
+            if text and text.strip():
+                w["handoff"] = {"text": text.strip(), "at": now()}
+                if w["status"] == "live":
+                    set_status(w, "handed-off")
+    r.save()
+    return changed
+
+
 def sync(r: Registry, h: Herdr) -> list:
     live = h.live_sessions()
-    changed = []
+    changed = sync_remote(r)
     for w in r.data["workers"]:
+        if w.get("machine"):
+            continue
         if w["status"] in ("live", "handed-off", "review") and w["session_id"] not in live:
             set_status(w, "detached")
             changed.append(w["label"])
@@ -583,8 +729,34 @@ def where(r: Registry) -> str:
     return f"home {home}" if home else "none"
 
 
+def cmd_wait(a) -> None:
+    """Block until a remote bee stops working (done, blocked, error, exit) or hc's timeout, then show what it has."""
+    r = current_registry(a.orch)
+    w = need_worker(r, a.label)
+    if not w.get("machine"):
+        raise HiveError(f"{w['label']} is a local bee; it reports by SendMessage, so there is nothing to wait on")
+    if not w.get("address") or w["status"] not in OPEN_STATES:
+        raise HiveError(f"{w['label']} is {w['status']} with no terminal to wait on; hive restore it first")
+    hc = Hc()
+    res = hc.wait(w["address"], a.timeout)
+    sync_remote(r, hc)
+    status = hc.status(hc.get(w["address"])) if res.get("reason") != "timeout" else "working"
+    if w.get("handoff"):
+        print(f"{w['label']} handed off ({status}):\n{w['handoff']['text']}")
+    elif res.get("reason") == "timeout":
+        print(f"{w['label']} is still working after {a.timeout}s; wait again or hc attach {w['address']}")
+    elif status == "finished":
+        print(f"{w['label']}'s terminal ended with no handoff; last screen:\n{screen_tail(hc, w['address'])}")
+    else:
+        print(f"{w['label']} is {status} with no handoff yet; its screen:\n{screen_tail(hc, w['address'])}")
+
+
 def cmd_status(a) -> None:
     r = current_registry(a.orch)
+    try:
+        sync_remote(r)
+    except HcError as e:
+        print(f"hive: remote bees not refreshed: {e}", file=sys.stderr)
     o = r.data["orchestrator"]
     running = "" if refresh_orchestrator(r) else ", not running"
     print(f"◆ {r.data['label']}  [{r.slug}]  workspace {where(r)}  queen {o.get('name')} ({o.get('model')}{running})")
@@ -628,6 +800,9 @@ def restore_one(r: Registry, include_closed: bool, labels: list) -> None:
     wanted = [need_worker(r, l) for l in labels] if labels else [
         w for w in r.data["workers"] if w["status"] in OPEN_STATES or (include_closed and w["status"] == "closed")]
     for w in wanted:
+        if w.get("machine"):
+            restore_remote(r, h, w)
+            continue
         if w["session_id"] in live:
             print(f"  {w['label']}: already open")
             continue
@@ -641,6 +816,24 @@ def restore_one(r: Registry, include_closed: bool, labels: list) -> None:
         w["slug"] = name
         r.save()
         print(f"  {w['label']}: resumed in {w['tab_id']}")
+
+
+def restore_remote(r: Registry, h: Herdr, w: dict) -> None:
+    """Resume a remote bee's Claude on its machine and reopen the Mac tab attached to it."""
+    hc = Hc()
+    if w.get("address") and hc.status(hc.get(w["address"])) != "finished":
+        print(f"  {w['label']}: already open on {w['machine']} ({w['address']})")
+        return
+    if w.get("address"):
+        hc.rm(w["address"])
+    if w["status"] in ("detached", "closed", "failed"):
+        set_status(w, "handed-off" if w.get("handoff") else "live")
+    if w.get("tab_id") and any(t["tab_id"] == w["tab_id"] for t in h.tabs()):
+        h.tab_close(w["tab_id"])
+    w["tab_id"] = w["pane_id"] = None
+    start_remote(hc, h, r, w, claude_args(w["session_id"], w["label"], w["model"], resume=True))
+    r.save()
+    print(f"  {w['label']}: resumed on {w['machine']} as {w['address']} (tab {w['tab_id']})")
 
 
 def cmd_restore(a) -> None:
@@ -689,11 +882,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--model", choices=MODEL_IDS, required=True)
     s.add_argument("--why", required=True, help="one line: why this model")
     s.add_argument("--brief", required=True, help="markdown brief file")
-    s.add_argument("--cwd")
+    s.add_argument("--cwd", help="folder for the bee; with --on, an absolute path on that machine (required)")
+    s.add_argument("--on", metavar="MACHINE", help="run the bee on this hc machine (hc machine ls) instead of a tab here")
 
     s = add("handoff", cmd_handoff, "record a bee's HIVE HANDOFF message")
     s.add_argument("label")
     s.add_argument("--file", required=True, help="file with the handoff text, or - for stdin")
+
+    s = add("wait", cmd_wait, "block until a remote bee stops working, then print its handoff or screen")
+    s.add_argument("label")
+    s.add_argument("--timeout", type=int, default=WAIT_TIMEOUT, help=f"seconds before giving up (default {WAIT_TIMEOUT})")
 
     add("queen", cmd_orchestrator, "print the queen's current SendMessage name")
 
@@ -735,7 +933,7 @@ def main(argv=None) -> int:
             args.orch, args.labels = args.labels[0], args.labels[1:]
     try:
         args.fn(args)
-    except (HiveError, HerdrError, RegistryError) as e:
+    except (HiveError, HerdrError, HcError, RegistryError) as e:
         print(f"hive: {e}", file=sys.stderr)
         return 1
     return 0
