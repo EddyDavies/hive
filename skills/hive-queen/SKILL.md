@@ -86,6 +86,8 @@ Eddy oversees hives on the go, often from his phone. He reads this chat; he does
 
 Never send him to a bee's tab to read something. If a bee produced something he must look at (a screen, a page, a diff), give him the link or path here. If its work ends in a decision only he can make, put the decision itself in this chat: the question, the options, your recommendation, in a few lines.
 
+The one exception is a bee worth going into. Mark a bee `⤵ go in` when its topic is deep enough that Eddy would get more from questioning the bee directly than from your summary: a noteworthy finding with lots of detail behind it, a design or investigation where his follow ups will be specific, anything where you would mostly be relaying. Say in a few words what he would dig into there. It is an offer, never a requirement: everything he must decide still goes in this chat. A `⤵ go in` bee stays open (that is a reason under Closing) until he says he is done with it or ticks it in the close question.
+
 ## Closing: keep tabs open only for unclosed loops
 
 A bee stays open only when one of these holds:
@@ -93,6 +95,7 @@ A bee stays open only when one of these holds:
 - `complete: no`: its work is unfinished and it will carry on.
 - An open thread: you are about to send it more work, or its `open:` items need it to chase them.
 - A decision Eddy owes that needs its context to act on the answer, and that context is NOT already on its page or in its files (`hive mark-review "<label>" --reason "..."`, and the decision goes in this chat as above). This is rare: a workshop or mockup whose options, recommendation and assets are on an HTML page does not qualify, because building the pick is new work (a fresh spawn, or `hive restore` if it truly needs the old conversation).
+- You marked it `⤵ go in` (see Reporting to Eddy).
 
 Every other bee closes.
 
@@ -106,12 +109,12 @@ When you report, separate the two kinds plainly: "needs you" is only a decision 
 
 ## Report format
 
-One list carries both the overview and each bee's fate, so every name appears once. One line per bee: a number, ✓ (closes) or ● (stays open), the label exactly as its tab shows it without the `o>`/`f>` prefix, then what it did and the result. A ● line ends with why it stays open, in words Eddy can act on. ✓ lines first, ● lines last, so anything he must answer sits at the bottom. Close with the key line:
+One list carries both the overview and each bee's fate, so every name appears once. One line per bee: a number, ✓ (closes), ● (stays open) or ⤵ (stays open, worth going into), the label exactly as its tab shows it without the `o>`/`f>` prefix, then what it did and the result. A ● line ends with why it stays open, in words Eddy can act on; a ⤵ line ends with "go in:" and what he would dig into there. ✓ lines first, then ⤵, then ●, so anything he must answer sits at the bottom. Close with the key line:
 
 ```
 1 ✓ magazine feed: 6 cutout variants loaded on the page
 2 ✓ receipt trading card: receipt prints from under the card, 3 styles
-3 ✓ hanging rail saved: rail with saved outfits, 2 layouts
+3 ⤵ hanging rail saved: rail with saved outfits, 2 layouts; go in: why the drag physics feel off on small screens
 4 ● dummy outfit builder: needs your pick, A (dummy front) or B (rail)
 5 ● item detail pinterest: Pinterest blocked by login; sign in and I rerun it
 
@@ -120,7 +123,14 @@ One list carries both the overview and each bee's fate, so every name appears on
 
 Numbers restart in every report; "keep 2" means line 2 of your last report. Bees still working are not listed until they hand off. If nothing closes, leave out the key line.
 
-On Eddy's next message, before anything else, `hive close` each ✓ bee, unless he said to keep one (by number or label). Then tell him in one line which closed. `hive close` refuses without a recorded handoff and while the bee is working; do not reach for `--force` unless Eddy asked.
+## The close question
+
+After the report, ask with `AskUserQuestion` (see the global picker rules). Decisions from ● lines go first; the last question is always which bees to close, so a call carries at most 3 other questions. Write it so the dialog stands alone: "Which bees in hive `<label>` should close? (numbers from the report above)".
+
+- 4 or fewer listed bees: `multiSelect: true`, one tick box per bee, labelled `<number> <label>`, with "(Recommended)" on each ✓ bee. The description says what closing loses, or "nothing open".
+- More than 4: `multiSelect: false` with group options: "Close all ✓ (1, 2) (Recommended)", "Close all ✓ and ⤵", "Close every bee", "Keep all open". Name the numbers in each label. Eddy types any other set (e.g. "close 1 3 5") into Other.
+
+On his answer, `hive close` exactly the bees he ticked, and nothing else; a ✓ bee he left unticked stays open. If he dismisses the picker instead, fall back to the key line: on his next message, before anything else, `hive close` each ✓ bee unless he said to keep one (by number or label). Either way, tell him in one line which closed. `hive close` refuses without a recorded handoff and while the bee is working; do not reach for `--force` unless Eddy asked.
 
 ## Restore
 
