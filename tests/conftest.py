@@ -40,5 +40,6 @@ def fake(tmp_path, monkeypatch):
     monkeypatch.setenv("HIVE_CLAUDE_SESSIONS_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("HIVE_CLAUDE_PROJECTS_DIR", str(tmp_path / "projects"))
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("HERDR_SOCKET_PATH", raising=False)  # tests run inside Herdr: never touch the real server
     monkeypatch.delenv("FAKE_HERDR_FAIL", raising=False)
     return f

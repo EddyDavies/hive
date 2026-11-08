@@ -249,7 +249,7 @@ def make_room(r: Registry, h: Herdr, ws: str, pane: str, mine: dict, socket):
         print(f"took workspace {ws} from {other.slug} ({why}); it stays restorable")
         r.data["workspace_id"] = ws
         return ws, mine
-    moved = h.pane_move_to_new_workspace(pane, f"◆ {r.data['label']}")
+    moved = h.pane_move_to_new_workspace(pane, f"◆ {r.data['label']}", below=ws)
     new_ws, pane, tab = moved["workspace_id"], moved["pane_id"], moved["tab_id"]
     r.data["workspace_id"] = new_ws
     r.data["orchestrator"].update(pane_id=pane, tab_id=tab)
@@ -258,10 +258,12 @@ def make_room(r: Registry, h: Herdr, ws: str, pane: str, mine: dict, socket):
 
 
 def go_out(r: Registry, h: Herdr) -> str:
-    """Move the queen chat into a workspace of its own, `◆ <label>`, where its bees' tabs open.
-    Every hive works in its own workspace, so Eddy's workspaces are never relabelled or crowded."""
+    """Move the queen chat into a workspace of its own, `◆ <label>`, where its bees' tabs open, just under
+    the workspace it came from. Every hive works in its own workspace, so Eddy's workspaces are never relabelled or
+    crowded, and the pair stay side by side."""
     o = r.data["orchestrator"]
-    moved = h.pane_move_to_new_workspace(o["pane_id"], f"◆ {r.data['label']}")
+    home = (r.data.get("home") or {}).get("workspace_id")
+    moved = h.pane_move_to_new_workspace(o["pane_id"], f"◆ {r.data['label']}", below=home)
     r.data["workspace_id"] = moved["workspace_id"]
     o.update(pane_id=moved["pane_id"], tab_id=moved["tab_id"])
     r.save()
@@ -278,6 +280,11 @@ def label_here(r: Registry, h: Herdr) -> None:
     r.save()
 
 
+def without_mark(label: str) -> str:
+    """The name a tab or workspace goes back to: ◆ marks a live hive, and it may be left over from an earlier one."""
+    return label.removeprefix("◆").strip()
+
+
 def go_home(r: Registry, h: Herdr):
     """Every bee is closed: move the queen chat back to the workspace it started in, under its old tab
     name. Herdr closes the hive workspace once it is empty. Returns a line for Eddy, or None if it stays put."""
@@ -289,9 +296,9 @@ def go_home(r: Registry, h: Herdr):
         if not home.get("solo") or home.get("returned"):
             return None
         if home.get("workspace_label"):
-            h.workspace_rename(home["workspace_id"], home["workspace_label"])
-        if home.get("tab_label") and o.get("tab_id"):
-            h.tab_rename(o["tab_id"], home["tab_label"])
+            h.workspace_rename(home["workspace_id"], without_mark(home["workspace_label"]))
+        if o.get("tab_id"):
+            h.tab_rename(o["tab_id"], without_mark(home.get("tab_label") or r.data["label"]))
         home["returned"] = True
         r.save()
         return "every bee closed: the workspace and the queen's tab have their old names back"
@@ -300,7 +307,7 @@ def go_home(r: Registry, h: Herdr):
     if o.get("session_id") not in h.live_sessions():
         return None
     hive_ws = r.data["workspace_id"]
-    moved = h.pane_move_to_workspace(o["pane_id"], home["workspace_id"], home.get("tab_label") or f"◆ {r.data['label']}")
+    moved = h.pane_move_to_workspace(o["pane_id"], home["workspace_id"], without_mark(home.get("tab_label") or r.data["label"]))
     o.update(pane_id=moved["pane_id"], tab_id=moved["tab_id"])
     r.data["workspace_id"] = None  # at home; the next spawn moves it out again
     r.save()
@@ -612,7 +619,8 @@ def restore_one(r: Registry, include_closed: bool, labels: list) -> None:
         o["pane_id"] = live[o["session_id"]]["pane_id"]
         print(f"moved the queen to workspace {go_out(r, h)} for {r.slug}")
     elif r.data["workspace_id"] not in ws_ids:
-        ws, tab, pane = h.workspace_create(f"◆ {r.data['label']}", r.data["cwd"])
+        ws, tab, pane = h.workspace_create(f"◆ {r.data['label']}", r.data["cwd"],
+                                            below=(r.data.get("home") or {}).get("workspace_id"))
         r.data["workspace_id"] = ws
         r.save()
         if o.get("session_id") not in live:

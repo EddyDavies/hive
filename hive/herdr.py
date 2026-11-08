@@ -3,7 +3,9 @@ object or raises HerdrError with herdr's own message."""
 
 import json
 import os
+import socket as unix_socket
 import subprocess
+import sys
 import time
 
 
@@ -22,6 +24,7 @@ class Herdr:
         if os.environ.get("HERDR_ENV") != "1":
             raise HerdrError("not inside Herdr (HERDR_ENV is not 1); run hive from a Herdr pane")
         self.env = {**os.environ, "HERDR_SOCKET_PATH": socket} if socket else None
+        self.socket = socket or os.environ.get("HERDR_SOCKET_PATH")
 
     def run(self, *args: str) -> subprocess.CompletedProcess:
         try:
@@ -55,8 +58,48 @@ class Herdr:
     def tabs(self) -> list:
         return self.call("tab", "list")["tabs"]
 
-    def workspace_create(self, label: str, cwd: str) -> tuple:
+    def rpc(self, method: str, params: dict) -> dict:
+        """Call the server's socket API directly, for methods the herdr CLI has no command for."""
+        if not self.socket:
+            raise HerdrError(f"{method}: no Herdr socket known")
+        try:
+            with unix_socket.socket(unix_socket.AF_UNIX) as s:
+                s.settimeout(10)
+                s.connect(self.socket)
+                s.sendall((json.dumps({"id": "hive", "method": method, "params": params}) + "\n").encode())
+                body = json.loads(s.makefile().readline())
+        except (OSError, ValueError) as e:
+            raise HerdrError(f"{method}: {e}")
+        if "error" in body:
+            raise HerdrError(f"{method}: {body['error'].get('message')}", body["error"].get("code"))
+        return body.get("result", {})
+
+    def place_below(self, workspace_id: str, below: str, order: list) -> None:
+        """Move a new workspace (Herdr adds them last) to just under `below`, so a hive sits next to the workspace
+        it came from. `order` is the workspace order before the new one appeared: if `below` has closed since, the
+        new workspace takes its slot. A wrong position costs nothing, so failing warns rather than stops the hive."""
+        try:
+            now = [w["workspace_id"] for w in self.workspaces()]
+            if below in now:
+                index = now.index(below) + 1
+            elif below in order:
+                index = order.index(below)
+            else:
+                return
+            if now.index(workspace_id) != index:
+                self.rpc("workspace.move", {"workspace_id": workspace_id, "insert_index": index})
+        except (HerdrError, ValueError) as e:
+            print(f"warning: workspace {workspace_id} stays at the end of the list, not under {below}: {e}",
+                  file=sys.stderr)
+
+    def order(self) -> list:
+        return [w["workspace_id"] for w in self.workspaces()]
+
+    def workspace_create(self, label: str, cwd: str, below: str = None) -> tuple:
+        order = self.order() if below else []
         r = self.call("workspace", "create", "--label", label, "--cwd", cwd)
+        if below:
+            self.place_below(r["workspace"]["workspace_id"], below, order)
         return r["workspace"]["workspace_id"], r["tab"]["tab_id"], r["root_pane"]["pane_id"]
 
     def workspace_rename(self, workspace_id: str, label: str) -> None:
@@ -65,10 +108,13 @@ class Herdr:
     def workspaces(self) -> list:
         return self.call("workspace", "list")["workspaces"]
 
-    def pane_move_to_new_workspace(self, pane_id: str, label: str) -> dict:
-        """Move a pane (and the chat running in it) into a fresh workspace; its ids change."""
+    def pane_move_to_new_workspace(self, pane_id: str, label: str, below: str = None) -> dict:
+        """Move a pane (and the chat running in it) into a fresh workspace, just under `below`; its ids change."""
+        order = self.order() if below else []
         r = self.call("pane", "move", pane_id, "--new-workspace", "--label", label, "--tab-label", label,
                       "--no-focus")["move_result"]
+        if below:
+            self.place_below(r["created_workspace"]["workspace_id"], below, order)
         return {"workspace_id": r["created_workspace"]["workspace_id"], "pane_id": r["pane"]["pane_id"],
                 "tab_id": r["pane"]["tab_id"]}
 

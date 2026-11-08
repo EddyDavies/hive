@@ -1,6 +1,11 @@
 import json
 import os
+import shutil
+import socket
+import tempfile
+import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +31,10 @@ def orch(fake, monkeypatch, tmp_path):
 
 def reg():
     return Registry.load("fc-postiz")
+
+
+def reg_of(slug):
+    return Registry.load(slug)
 
 
 def test_init_records_orchestrator_and_labels_workspace(fake, orch):
@@ -653,6 +662,30 @@ def test_closing_the_last_bee_takes_the_queen_home(fake, monkeypatch, tmp_path, 
     assert world["workspaces"]["w1"]["label"] == "pink ladies"
 
 
+@pytest.mark.parametrize("recorded, expected", [("◆ earlier hive", "earlier hive"), (None, "fc: postiz")])
+def test_the_queen_comes_home_without_the_hive_mark(fake, monkeypatch, tmp_path, recorded, expected):
+    busy_home(fake, monkeypatch)
+    r = reg()
+    r.data["home"]["tab_label"] = recorded
+    r.save()
+    brief = tmp_path / "b.md"
+    brief.write_text("x")
+    cli.main(["spawn", "Drip", "--model", "opus", "--why", "x", "--brief", str(brief)])
+    finish(tmp_path)
+    r = reg()
+    assert fake.world()["tabs"][r.data["orchestrator"]["tab_id"]]["label"] == expected
+
+
+def test_a_solo_queen_loses_a_mark_left_from_an_earlier_hive(fake, orch, tmp_path):
+    r = reg()
+    r.data["home"].update(tab_label="◆ earlier", workspace_label="◆ earlier")
+    r.save()
+    spawn(orch)
+    finish(tmp_path)
+    assert fake.world()["workspaces"]["w1"]["label"] == "earlier"
+    assert fake.world()["tabs"]["w1:t1"]["label"] == "earlier"
+
+
 def test_spawning_from_home_moves_the_queen_out_again(fake, monkeypatch, tmp_path, capsys):
     busy_home(fake, monkeypatch)
     brief = tmp_path / "b.md"
@@ -693,3 +726,76 @@ def test_queen_stays_when_its_home_workspace_is_gone(fake, monkeypatch, tmp_path
     finish(tmp_path)
     assert "is gone, so the queen stays" in capsys.readouterr().out
     assert reg().data["workspace_id"] == hive_ws
+
+
+@pytest.fixture
+def herdr_server(monkeypatch):
+    """A stand-in for the Herdr socket API; returns the requests it received. Fails them if error is set."""
+    folder = tempfile.mkdtemp(dir="/tmp")  # unix socket paths have a short length limit
+    path = os.path.join(folder, "s.sock")
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(path)
+    listener.listen()
+    server = SimpleNamespace(requests=[], error=None)
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            with conn:
+                server.requests.append(json.loads(conn.makefile().readline()))
+                reply = {"error": server.error} if server.error else {"result": {"type": "workspace_list"}}
+                conn.sendall((json.dumps({"id": "hive", **reply}) + "\n").encode())
+
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setenv("HERDR_SOCKET_PATH", path)
+    yield server
+    listener.close()
+    shutil.rmtree(folder)
+
+
+def seed_busy_workspace_then_another(fake, monkeypatch):
+    """This chat in w1, which holds another tab too, with an unrelated workspace w2 below it."""
+    monkeypatch.setenv("HERDR_WORKSPACE_ID", "w1")
+    monkeypatch.setenv("HERDR_PANE_ID", "w1:p1")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "orch-sid")
+    fake.seed(workspaces={"w1": {"label": "old"}, "w2": {"label": "next"}},
+              tabs={"w1:t1": {"label": "1", "workspace_id": "w1", "pane_id": "w1:p1"},
+                    "w1:t2": {"label": "2", "workspace_id": "w1", "pane_id": "w1:p2"},
+                    "w2:t1": {"label": "3", "workspace_id": "w2", "pane_id": "w2:p1"}},
+              agents=[{"agent": "claude", "pane_id": "w1:p1", "tab_id": "w1:t1", "agent_status": "working",
+                       "agent_session": {"kind": "id", "value": "orch-sid"}}])
+
+
+def test_new_hive_workspace_opens_just_below_the_one_it_came_from(fake, monkeypatch, herdr_server):
+    seed_busy_workspace_then_another(fake, monkeypatch)
+    assert cli.main(["init", "paired"]) == 0
+    new = reg_of("paired").data["workspace_id"]
+    assert [(q["method"], q["params"]) for q in herdr_server.requests] == [
+        ("workspace.move", {"workspace_id": new, "insert_index": 1})]
+
+
+def test_hive_workspace_is_left_alone_when_already_below(fake, monkeypatch, herdr_server):
+    seed_busy_workspace_then_another(fake, monkeypatch)
+    world = fake.world()
+    del world["workspaces"]["w2"], world["tabs"]["w2:t1"]
+    fake.seed(**world)
+    assert cli.main(["init", "paired"]) == 0
+    assert herdr_server.requests == []
+
+
+def test_failing_to_place_the_workspace_warns_and_carries_on(fake, monkeypatch, herdr_server, capsys):
+    seed_busy_workspace_then_another(fake, monkeypatch)
+    herdr_server.error = {"code": "workspace_move_failed", "message": "insert_index 1 is out of bounds"}
+    assert cli.main(["init", "paired"]) == 0
+    assert "stays at the end of the list, not under w1: workspace.move: insert_index 1" in capsys.readouterr().err
+    assert reg_of("paired").data["workspace_id"] != "w1"
+
+
+def test_a_workspace_that_closed_in_the_move_gives_up_its_slot(fake, herdr_server):
+    from hive.herdr import Herdr
+    fake.seed(workspaces={"w2": {"label": "b"}, "w3": {"label": "c"}, "w9": {"label": "new"}}, tabs={}, agents=[])
+    Herdr().place_below("w9", "w1", ["w1", "w2", "w3"])
+    assert herdr_server.requests[0]["params"] == {"workspace_id": "w9", "insert_index": 0}
